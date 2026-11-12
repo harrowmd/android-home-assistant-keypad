@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.HAKeypad" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+    </style>
+    <style name="Theme.HAKeypad.Settings" parent="Theme.Material3.DayNight">
+    </style>
+</resources>

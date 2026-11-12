@@ -1,0 +1,14 @@
+<resources>
+    <color name="bg">#FF101214</color>
+    <color name="bar_text">#FFB0B6BC</color>
+    <color name="tile_on">#FFFFB300</color>
+    <color name="tile_off">#FF2C3136</color>
+    <color name="tile_sensor">#FF1E3A4C</color>
+    <color name="tile_unavailable">#FF1A1C1E</color>
+    <color name="text_on">#FF1A1200</color>
+    <color name="text_off">#FFE8EAED</color>
+    <color name="status_ok">#FF4CAF50</color>
+    <color name="status_wait">#FFFFB300</color>
+    <color name="status_bad">#FFE53935</color>
+    <color name="icon_bg">#FF1E3A4C</color>
+</resources>
