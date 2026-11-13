@@ -109,6 +109,85 @@
             android:layout_height="wrap_content"
             android:text="Make this the Home app" />
 
+        <TextView style="@style/SettingsHeading" android:text="Wi-Fi" />
+
+        <TextView
+            android:id="@+id/wifi_now"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/wifi_owner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textIsSelectable="true"
+            android:textSize="13sp" />
+
+        <CheckBox
+            android:id="@+id/wifi_guard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Look after the Wi-Fi connection" />
+
+        <EditText
+            android:id="@+id/wifi_ssid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Wi-Fi network name (empty = the current one)"
+            android:inputType="text" />
+
+        <EditText
+            android:id="@+id/wifi_aps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="top"
+            android:hint="Preferred access points, best first, one per line: name  BSSID (empty = strongest)"
+            android:inputType="textMultiLine|textNoSuggestions"
+            android:minLines="2"
+            android:textSize="13sp"
+            android:typeface="monospace" />
+
+        <EditText
+            android:id="@+id/wifi_min_rssi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Weakest usable signal, dBm (e.g. -80)"
+            android:inputType="numberSigned" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Every 15 s the keypad checks the Wi-Fi and that Home Assistant answers. If the link stays bad, or a preferred access point is clearly better, it moves the phone to the best access point and keeps it there. Repairs need HA Keypad to be device owner (see above). Android 10 does not let it switch Wi-Fi on if someone switches it off."
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_nearby"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="Nearby APs" />
+
+            <Button
+                android:id="@+id/btn_wifi_log"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Wi-Fi log" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_remove_owner"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Stop being device owner" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

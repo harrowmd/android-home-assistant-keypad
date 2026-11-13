@@ -53,13 +53,26 @@ class HaClient(
         fun onConnection(status: Status, detail: String = "")
         fun onAllStates(states: Map<String, EntityState>)
         fun onStateChanged(state: EntityState)
+        /** Home Assistant did not confirm a press within PRESS_GIVE_UP_MS. */
+        fun onPressFailed(entityId: String) {}
+    }
+
+    /** A press waiting for Home Assistant to confirm it. */
+    private class Press(val entityId: String, val body: JSONObject, val repeatable: Boolean, val since: Long) {
+        var msgId = -1
+        var sentAt = 0L
     }
 
     enum class Status { CONNECTING, CONNECTED, AUTH_FAILED, DISCONNECTED }
 
     private val main = Handler(Looper.getMainLooper())
+    companion object {
+        private const val PRESS_ACK_MS = 2_500L       // no answer by then: the socket is probably dead
+        private const val PRESS_GIVE_UP_MS = 60_000L
+    }
+    private val presses = LinkedHashMap<String, Press>()   // entity id → press not yet confirmed
     private val http = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
+        .pingInterval(10, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
@@ -70,6 +83,7 @@ class HaClient(
     private var stopped = false
     private var retryDelayMs = 2000L
     private var authOk = false
+    private var connectStarted = 0L
 
     fun start() {
         stopped = false
@@ -83,20 +97,71 @@ class HaClient(
         ws = null
     }
 
-    /** Toggle a switch/light/fan/input_boolean, or run a script/scene. */
-    fun press(entityId: String) {
+    /**
+     * Switch an entity, or run a script/scene/button.
+     *
+     * [wantOn] is the state the user asked for. Switches are sent as turn_on/turn_off, not
+     * "toggle", so a press can safely be sent again if the first try got lost: sending
+     * "turn on" twice still means on. Each press waits for Home Assistant's answer; if none
+     * comes within 2.5 s the connection is rebuilt and the press sent again, for up to 60 s.
+     * A press made while offline waits and goes out as soon as the connection is back.
+     */
+    fun press(entityId: String, wantOn: Boolean) {
         val domain = entityId.substringBefore('.')
-        val (svcDomain, service) = when (domain) {
-            "script", "scene" -> domain to "turn_on"
-            "button", "input_button" -> domain to "press"
-            "lock" -> "lock" to "toggle"
-            else -> "homeassistant" to "toggle"
+        val (svcDomain, service, repeatable) = when (domain) {
+            "script", "scene" -> Triple(domain, "turn_on", false)
+            "button", "input_button" -> Triple(domain, "press", false)
+            "lock" -> Triple("lock", if (wantOn) "lock" else "unlock", true)
+            "cover" -> Triple("cover", if (wantOn) "open_cover" else "close_cover", true)
+            else -> Triple("homeassistant", if (wantOn) "turn_on" else "turn_off", true)
         }
-        send(JSONObject()
+        val body = JSONObject()
             .put("type", "call_service")
             .put("domain", svcDomain)
             .put("service", service)
-            .put("target", JSONObject().put("entity_id", entityId)))
+            .put("target", JSONObject().put("entity_id", entityId))
+        val p = Press(entityId, body, repeatable, System.currentTimeMillis())
+        presses[entityId] = p          // a newer press of the same tile replaces an older one
+        // Not logged in: send it when we are. Only start a new connection if none is under way.
+        if (authOk) sendPress(p)
+        else if (ws == null || System.currentTimeMillis() - connectStarted > 10_000) reconnectNow()
+        main.removeCallbacks(pressCheck)
+        main.postDelayed(pressCheck, 500)
+    }
+
+    private fun sendPress(p: Press) {
+        val o = JSONObject(p.body.toString())
+        p.msgId = nextId
+        p.sentAt = System.currentTimeMillis()
+        send(o)
+    }
+
+    private val pressCheck = object : Runnable {
+        override fun run() {
+            if (presses.isEmpty()) return
+            val now = System.currentTimeMillis()
+            var stale = false
+            for (p in presses.values.toList()) {
+                when {
+                    now - p.since > PRESS_GIVE_UP_MS -> {
+                        presses.remove(p.entityId)
+                        listener.onPressFailed(p.entityId)
+                    }
+                    authOk && p.sentAt > 0 && now - p.sentAt > PRESS_ACK_MS -> stale = true
+                }
+            }
+            // A press got no answer: the socket is dead without knowing it. Start again.
+            if (stale) reconnectNow()
+            if (presses.isNotEmpty()) main.postDelayed(this, 500)
+        }
+    }
+
+    /** After logging in again: send the presses that are still waiting. */
+    private fun resendPresses() {
+        for (p in presses.values.toList()) {
+            if (p.sentAt == 0L || p.repeatable) sendPress(p)
+            else { presses.remove(p.entityId); listener.onPressFailed(p.entityId) }  // may have run: don't run twice
+        }
     }
 
     private fun wsUrl(): String {
@@ -112,6 +177,7 @@ class HaClient(
     private fun connect() {
         if (stopped) return
         authOk = false
+        connectStarted = System.currentTimeMillis()
         post { listener.onConnection(Status.CONNECTING) }
         val req = try {
             Request.Builder().url(wsUrl()).build()
@@ -136,11 +202,28 @@ class HaClient(
         })
     }
 
+    private val reconnect = Runnable { connect() }
+
     private fun scheduleReconnect() {
         if (stopped) return
         val delay = retryDelayMs
         retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
-        main.postDelayed({ connect() }, delay)
+        main.removeCallbacks(reconnect)
+        main.postDelayed(reconnect, delay)
+    }
+
+    /**
+     * The phone has (re)joined a network: connect again at once instead of waiting out the
+     * retry delay, and drop the old socket, which may be dead without knowing it yet.
+     */
+    fun reconnectNow() {
+        if (stopped) return
+        main.removeCallbacks(reconnect)
+        retryDelayMs = 2000L
+        val old = ws
+        ws = null            // its late failure/close callbacks are then ignored
+        old?.cancel()
+        connect()
     }
 
     private fun send(o: JSONObject) {
@@ -164,8 +247,12 @@ class HaClient(
                 getStatesId = nextId
                 send(JSONObject().put("type", "get_states"))
                 send(JSONObject().put("type", "subscribe_events").put("event_type", "state_changed"))
+                post { resendPresses() }
             }
-            "result" -> if (msg.optInt("id") == getStatesId && msg.optBoolean("success")) {
+            "result" -> if (msg.optInt("id") != getStatesId) {
+                val id = msg.optInt("id")
+                post { presses.values.firstOrNull { it.msgId == id }?.let { presses.remove(it.entityId) } }
+            } else if (msg.optBoolean("success")) {
                 val arr = msg.optJSONArray("result") ?: JSONArray()
                 val map = HashMap<String, EntityState>()
                 for (i in 0 until arr.length()) {

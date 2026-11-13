@@ -24,6 +24,11 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import android.widget.Toast
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,9 +41,24 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     private lateinit var clockView: TextView
     private lateinit var statusView: TextView
     private lateinit var emptyView: TextView
+    private lateinit var offlineView: View
+    private lateinit var offlineDetail: TextView
     private val adapter = TileAdapter()
 
     private var client: HaClient? = null
+    private var lastNetwork: Network? = null
+    /** When the phone joins Wi-Fi again, reconnect to Home Assistant at once. */
+    private val netCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            main.post {
+                val first = lastNetwork == null
+                val changed = network != lastNetwork
+                lastNetwork = network
+                if (!first && changed) client?.reconnectNow()
+            }
+        }
+    }
+    private lateinit var wifiGuard: WifiGuard
     private val states = HashMap<String, EntityState>()
     private val pending = HashMap<String, Long>()   // entity id → time pressed
 
@@ -53,6 +73,25 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     }
     private val settingsHold = Runnable { askPinThenOpenSettings() }
 
+    // ---- offline warning: after OFFLINE_WARN_MS without Home Assistant, cover the buttons in red ----
+    private val OFFLINE_WARN_MS = 60_000L
+    private var offlineSince = 0L          // 0 = connected
+    private var lastDetail = ""
+    private val offlineRunnable = Runnable { showOffline() }
+
+    private fun showOffline(wake: Boolean = true) {
+        if (offlineSince == 0L || !prefs.isConfigured) return
+        val since = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(offlineSince))
+        offlineDetail.text = buildString {
+            append("Since ").append(since).append(". Check the Wi-Fi.\nIt reconnects by itself.")
+            if (lastDetail.isNotBlank()) append("\n\n").append(lastDetail)
+            append("\n\n").append(wifiGuard.status)
+        }
+        val wasShown = offlineView.visibility == View.VISIBLE
+        offlineView.visibility = View.VISIBLE
+        if (wake && !wasShown) setDimmed(false)   // make sure it is noticed
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
@@ -61,12 +100,14 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         clockView = findViewById(R.id.clock)
         statusView = findViewById(R.id.status)
         emptyView = findViewById(R.id.empty)
+        offlineView = findViewById(R.id.offline)
+        offlineDetail = findViewById(R.id.offline_detail)
         grid = findViewById(R.id.grid)
         grid.adapter = adapter
         grid.itemAnimator = null
         // Tile heights depend on the grid height, so redraw once it is known or changes.
         grid.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) grid.post { adapter.notifyDataSetChanged() }
+            if (bottom - top != oldBottom - oldTop) grid.post { layoutTiles() }
         }
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -83,6 +124,12 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         }
         emptyView.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
 
+        // Watches the Wi-Fi all the time the keypad exists, not only while it is on screen.
+        wifiGuard = WifiGuard(this, prefs).also {
+            it.onStatus = { if (offlineView.visibility == View.VISIBLE) showOffline(wake = false) }
+            it.start()
+        }
+
         // This is a fixed wall keypad: Back does nothing.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {}
@@ -96,6 +143,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         val cols = prefs.columns
         grid.layoutManager = GridLayoutManager(this, cols)
         adapter.setItems(prefs.buttons)
+        grid.post { layoutTiles() }
         updateEmpty()
         main.post(clockRunnable)
         startClient()
@@ -106,6 +154,11 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         super.onPause()
         main.removeCallbacks(clockRunnable)
         main.removeCallbacks(dimRunnable)
+        main.removeCallbacks(offlineRunnable)
+        offlineSince = 0L
+        offlineView.visibility = View.GONE
+        try { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(netCallback) } catch (_: Exception) {}
+        lastNetwork = null
         client?.stop()
         client = null
     }
@@ -131,6 +184,10 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             return
         }
         client = HaClient(prefs.serverUrl, prefs.token, this).also { it.start() }
+        try {
+            getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
+                NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), netCallback)
+        } catch (_: Exception) {}   // already registered
     }
 
     private fun updateEmpty() {
@@ -206,13 +263,40 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         }
         if (status != HaClient.Status.CONNECTED) adapter.notifyDataSetChanged()
         connected = status == HaClient.Status.CONNECTED
+        if (detail.isNotBlank()) lastDetail = detail
+        when {
+            connected -> {
+                offlineSince = 0L
+                lastDetail = ""
+                main.removeCallbacks(offlineRunnable)
+                offlineView.visibility = View.GONE
+            }
+            status == HaClient.Status.AUTH_FAILED -> {
+                // Won't fix itself: show the warning straight away.
+                if (offlineSince == 0L) offlineSince = System.currentTimeMillis()
+                lastDetail = "The token was rejected. Hold the title for 2 s to fix it in Settings."
+                main.removeCallbacks(offlineRunnable)
+                showOffline()
+            }
+            offlineSince == 0L -> {
+                offlineSince = System.currentTimeMillis()
+                main.postDelayed(offlineRunnable, OFFLINE_WARN_MS)
+            }
+            offlineView.visibility == View.VISIBLE -> showOffline(wake = false)   // refresh the detail
+        }
     }
     private var connected = false
 
     override fun onAllStates(states: Map<String, EntityState>) {
         this.states.clear()
         this.states.putAll(states)
+        prefs.cacheNames(prefs.buttons.mapNotNull { id -> states[id]?.let { id to it.name } }.toMap())
         adapter.notifyDataSetChanged()
+    }
+
+    override fun onPressFailed(entityId: String) {
+        if (pending.remove(entityId) != null) adapter.refresh(entityId)
+        Toast.makeText(this, "Not switched: no answer from Home Assistant", Toast.LENGTH_LONG).show()
     }
 
     override fun onStateChanged(state: EntityState) {
@@ -228,16 +312,37 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
     private fun press(entityId: String, v: View) {
         val c = client ?: return
-        if (!connected) return
         v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         pending[entityId] = System.currentTimeMillis()
         adapter.refresh(entityId)
-        c.press(entityId)
-        // If HA never reports a change (e.g. device offline), stop showing "…" after 6 s.
-        main.postDelayed({ if (pending.remove(entityId) != null) adapter.refresh(entityId) }, 6000)
+        // Ask for the opposite of what the tile shows. While offline the press waits (up to
+        // 60 s) and is sent as soon as the connection is back.
+        c.press(entityId, wantOn = !(states[entityId]?.isOn ?: false))
+        // If HA never reports a change (e.g. device offline), stop showing "…" after 62 s.
+        main.postDelayed({ if (pending.remove(entityId) != null) adapter.refresh(entityId) }, 62_000)
     }
 
     // ---- the grid of tiles ----
+
+    private var tileHeight = 0
+
+    /**
+     * Share the grid height between the rows, but keep each tile between 110 and 200 dp
+     * so a few buttons don't become tall stripes. Any space left over is split above and
+     * below, so the tiles sit in the middle of the screen.
+     */
+    private fun layoutTiles() {
+        val d = resources.displayMetrics.density
+        val minH = (110 * d).toInt()
+        val maxH = (200 * d).toInt()
+        val cols = (grid.layoutManager as? GridLayoutManager)?.spanCount ?: 2
+        val rows = ((adapter.itemCount + cols - 1) / cols).coerceAtLeast(1)
+        val avail = grid.height
+        tileHeight = if (avail > 0) (avail / rows).coerceIn(minH, maxH) else minH
+        val pad = ((avail - tileHeight * rows) / 2).coerceAtLeast(0)
+        grid.setPadding(0, pad, 0, pad)
+        adapter.notifyDataSetChanged()
+    }
 
     private inner class TileAdapter : RecyclerView.Adapter<TileAdapter.VH>() {
         private var items: List<String> = emptyList()
@@ -264,20 +369,19 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         override fun onBindViewHolder(h: VH, position: Int) {
             val id = items[position]
             val s = states[id]
-            // Make the tiles fill the screen: share the grid height between the rows.
-            val cols = (grid.layoutManager as? GridLayoutManager)?.spanCount ?: 2
-            val rows = ((items.size + cols - 1) / cols).coerceAtLeast(1)
-            val minH = (110 * resources.displayMetrics.density).toInt()
-            val gridH = grid.height - grid.paddingTop - grid.paddingBottom
-            h.itemView.layoutParams.height = if (gridH > 0) (gridH / rows).coerceAtLeast(minH) else minH
+            if (tileHeight > 0) h.itemView.layoutParams.height = tileHeight
 
-            val label = prefs.label(id) ?: s?.name ?: id
+            val label = prefs.label(id) ?: s?.name ?: prefs.cachedName(id) ?: id
             h.name.text = label
             val isSensor = id.startsWith("sensor.") || id.startsWith("binary_sensor.")
             val bg = h.tile.background.mutate() as GradientDrawable
 
             val colorRes: Int
             when {
+                pending.containsKey(id) && !connected -> {
+                    h.value.text = "…"        // pressed while offline: waits for the connection
+                    colorRes = R.color.tile_unavailable
+                }
                 s == null || !connected -> {
                     h.value.text = if (!connected) "–" else "not found"
                     colorRes = R.color.tile_unavailable
@@ -287,7 +391,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
                     colorRes = R.color.tile_unavailable
                 }
                 isSensor -> {
-                    h.value.text = listOfNotNull(s.state, s.unit).joinToString(" ")
+                    h.value.text = if (s.state.isBlank()) "–" else listOfNotNull(s.state, s.unit).joinToString(" ")
                     colorRes = R.color.tile_sensor
                 }
                 pending.containsKey(id) -> {
@@ -316,6 +420,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
     override fun onDestroy() {
         super.onDestroy()
+        wifiGuard.stop()
         main.removeCallbacksAndMessages(null)
     }
 }

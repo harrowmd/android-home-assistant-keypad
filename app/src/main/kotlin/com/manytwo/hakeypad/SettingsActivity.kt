@@ -1,11 +1,15 @@
 package com.manytwo.hakeypad
 
+import android.Manifest
+import android.app.admin.DevicePolicyManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -28,6 +32,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var buttonList: LinearLayout
     private lateinit var testResult: TextView
     private var buttons = mutableListOf<String>()
+    private lateinit var wifiGuardBox: CheckBox
+    private lateinit var wifiSsid: EditText
+    private lateinit var wifiAps: EditText
+    private lateinit var wifiMinRssi: EditText
+    private lateinit var guard: WifiGuard
 
     private val pick = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         val chosen = r.data?.getStringArrayListExtra(PickerActivity.EXTRA_SELECTED) ?: return@registerForActivityResult
@@ -60,6 +69,7 @@ class SettingsActivity : AppCompatActivity() {
         pin.setText(prefs.pin)
         buttons = prefs.buttons.toMutableList()
         showButtons()
+        setUpWifi()
 
         findViewById<TextView>(R.id.version).text =
             "HA Keypad ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_TIME}"
@@ -91,6 +101,10 @@ class SettingsActivity : AppCompatActivity() {
         prefs.dimPercent = dimPercent.text.toString().toIntOrNull() ?: 3
         prefs.pin = pin.text.toString()
         prefs.buttons = buttons
+        prefs.wifiGuard = wifiGuardBox.isChecked
+        prefs.wifiSsid = wifiSsid.text.toString()
+        prefs.wifiAps = wifiAps.text.toString()
+        prefs.wifiMinRssi = wifiMinRssi.text.toString().toIntOrNull() ?: -80
         toast("Saved")
     }
 
@@ -127,6 +141,117 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage(id)
             .setView(input)
             .setPositiveButton(android.R.string.ok) { _, _ -> prefs.setLabel(id, input.text.toString()); showButtons() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Wi-Fi ----
+
+    private fun setUpWifi() {
+        guard = WifiGuard(this, prefs)
+        wifiGuardBox = findViewById(R.id.wifi_guard)
+        wifiSsid = findViewById(R.id.wifi_ssid)
+        wifiAps = findViewById(R.id.wifi_aps)
+        wifiMinRssi = findViewById(R.id.wifi_min_rssi)
+        wifiGuardBox.isChecked = prefs.wifiGuard
+        wifiSsid.setText(prefs.wifiSsid)
+        wifiAps.setText(prefs.wifiAps)
+        wifiMinRssi.setText(prefs.wifiMinRssi.toString())
+        showOwner()
+        findViewById<TextView>(R.id.wifi_now).text = currentWifi()
+
+        // Without device owner, location permission must be granted by the user to see APs.
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            !WifiGuard.isDeviceOwner(this)) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
+        }
+
+        findViewById<Button>(R.id.btn_nearby).setOnClickListener { showNearby() }
+        findViewById<Button>(R.id.btn_wifi_log).setOnClickListener {
+            // Newest first, without the year, in small type so a line fits the screen.
+            val lines = guard.log.lines().takeLast(200).reversed().map { it.removeRange(0, minOf(5, it.length)) }
+            val text = TextView(this).apply {
+                text = if (lines.isEmpty()) "Nothing yet." else lines.joinToString("\n")
+                textSize = 12f
+                setTextIsSelectable(true)
+                val pad = (20 * resources.displayMetrics.density).toInt()
+                setPadding(pad, pad / 2, pad, 0)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Wi-Fi log (newest first)")
+                .setView(android.widget.ScrollView(this).apply { addView(text) })
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+        wifiGuardBox.setOnCheckedChangeListener { _, on ->
+            if (!on && prefs.wifiPinnedTo.isNotBlank()) AlertDialog.Builder(this)
+                .setTitle("Wi-Fi guard off")
+                .setMessage(pinNote.trim())
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+        findViewById<Button>(R.id.btn_remove_owner).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Stop being device owner?")
+                .setMessage("The keypad will then only watch the Wi-Fi, not repair it. To turn it back on you need adb (see the text above).$pinNote")
+                .setPositiveButton("Stop") { _, _ ->
+                    guard.log.add("Device owner removed in Settings")
+                    @Suppress("DEPRECATION")
+                    getSystemService(DevicePolicyManager::class.java).clearDeviceOwnerApp(packageName)
+                    showOwner()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
+    /** Android 10 can't undo a pin, so say how to do it by hand. */
+    private val pinNote: String get() = prefs.wifiPinnedTo.let { b ->
+        if (b.isBlank()) "" else "\n\nNote: the phone stays tied to access point ${guard.name(b)}. " +
+            "To let Android choose again: Android Settings → Wi-Fi → ${prefs.wifiSsid} → Forget, then join it again with the password."
+    }
+
+    private fun showOwner() {
+        val owner = WifiGuard.isDeviceOwner(this)
+        findViewById<TextView>(R.id.wifi_owner).text = if (owner)
+            "HA Keypad is device owner: it can repair the Wi-Fi."
+        else
+            "HA Keypad is not device owner, so it can only watch the Wi-Fi. To let it repair the Wi-Fi, remove all accounts from the phone, then run on a computer:\nadb shell dpm set-device-owner $packageName/.KeypadAdmin"
+        findViewById<View>(R.id.btn_remove_owner).visibility = if (owner) View.VISIBLE else View.GONE
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentWifi(): String {
+        val w = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+        val i = w.connectionInfo
+        if (!w.isWifiEnabled) return "Wi-Fi is off"
+        if (i == null || i.networkId == -1) return "Not connected to Wi-Fi"
+        return "Now: ${i.ssid.trim('"')} · ${guard.name(i.bssid?.lowercase())} · ${i.rssi} dBm · ${i.frequency} MHz"
+    }
+
+    /** Lists the access points of the network; tick some to add them to the preferred list. */
+    private fun showNearby() {
+        if (prefs.wifiSsid.isBlank() && wifiSsid.text.isNotBlank()) prefs.wifiSsid = wifiSsid.text.toString()
+        val list = guard.nearby()
+        if (list.isEmpty()) {
+            toast("No access points found (is location on?)"); return
+        }
+        val known = WifiGuard.parseAps(wifiAps.text.toString()).toMap()
+        val labels = list.map {
+            val band = if (it.frequency > 4900) "5 GHz" else "2.4 GHz"
+            "${known[it.BSSID] ?: it.BSSID}\n${it.level} dBm · $band"
+        }.toTypedArray()
+        val ticked = BooleanArray(list.size) { list[it].BSSID in known }
+        AlertDialog.Builder(this)
+            .setTitle("Access points of \"${prefs.wifiSsid}\"")
+            .setMultiChoiceItems(labels, ticked) { _, i, on -> ticked[i] = on }
+            .setPositiveButton("Add ticked") { _, _ ->
+                val lines = wifiAps.text.toString().lines().filter { it.isNotBlank() }.toMutableList()
+                list.forEachIndexed { i, r ->
+                    if (ticked[i] && r.BSSID !in known) lines += "ap${lines.size + 1}  ${r.BSSID}"
+                }
+                wifiAps.setText(lines.joinToString("\n"))
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }

@@ -4,4 +4,5 @@
     <string name="choose_buttons">Choose buttons</string>
     <string name="empty_not_setup">Not set up yet.\n\nTap here (or hold the title for 2 seconds) to enter your Home Assistant address and token.</string>
     <string name="empty_no_buttons">No buttons yet.\n\nHold the title for 2 seconds, then tap "Choose buttons".</string>
+    <string name="offline_title">No connection to Home Assistant</string>
 </resources>

@@ -66,5 +66,38 @@
             android:textColor="@color/bar_text"
             android:textSize="20sp"
             android:visibility="gone" />
+
+        <!-- Shown over the buttons when Home Assistant has been unreachable for a while. -->
+        <LinearLayout
+            android:id="@+id/offline"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_margin="6dp"
+            android:background="@drawable/offline_bg"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="32dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/offline_title"
+                android:textColor="#FFFFFF"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/offline_detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:textColor="#FFE0E0"
+                android:textSize="18sp" />
+        </LinearLayout>
     </FrameLayout>
 </LinearLayout>

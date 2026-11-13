@@ -56,5 +56,41 @@ class Prefs(context: Context) {
         else p.edit().putString("label:$entityId", label.trim()).apply()
     }
 
+    /** Wi-Fi guard on/off (see WifiGuard). Repairs only happen when the app is device owner. */
+    var wifiGuard: Boolean
+        get() = p.getBoolean("wifi_guard", true)
+        set(v) = p.edit().putBoolean("wifi_guard", v).apply()
+
+    /** The Wi-Fi network to look after. Empty = the one the phone is on (filled in automatically). */
+    var wifiSsid: String
+        get() = p.getString("wifi_ssid", "") ?: ""
+        set(v) = p.edit().putString("wifi_ssid", v.trim()).apply()
+
+    /** Preferred access points, best first, one per line: "name  BSSID". Empty = strongest. */
+    var wifiAps: String
+        get() = p.getString("wifi_aps", "") ?: ""
+        set(v) = p.edit().putString("wifi_aps", v.trim()).apply()
+
+    /** Signals weaker than this (dBm) count as bad when a better AP is visible. */
+    var wifiMinRssi: Int
+        get() = p.getInt("wifi_min_rssi", -80)
+        set(v) = p.edit().putInt("wifi_min_rssi", v.coerceIn(-95, -40)).apply()
+
+    /**
+     * The AP the guard last tied the saved network to. Android 10 cannot untie it again;
+     * only "forget network" in Android's Wi-Fi settings and joining again does that.
+     */
+    var wifiPinnedTo: String
+        get() = p.getString("wifi_pinned_to", "") ?: ""
+        set(v) = p.edit().putString("wifi_pinned_to", v).apply()
+
+    /** Last name Home Assistant gave each entity, so tiles keep their names while offline. */
+    fun cachedName(entityId: String): String? = p.getString("name:$entityId", null)
+    fun cacheNames(names: Map<String, String>) {
+        val e = p.edit()
+        for ((id, n) in names) if (p.getString("name:$id", null) != n) e.putString("name:$id", n)
+        e.apply()
+    }
+
     val isConfigured: Boolean get() = serverUrl.isNotBlank() && token.isNotBlank()
 }

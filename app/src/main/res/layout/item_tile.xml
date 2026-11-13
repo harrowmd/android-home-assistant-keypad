@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="120dp"
     android:padding="6dp">
@@ -14,22 +15,30 @@
         android:orientation="vertical"
         android:padding="12dp">
 
+        <!-- The name takes the space left above the value and shrinks to fit,
+             so the ON/OFF line is never pushed off the tile. -->
         <TextView
             android:id="@+id/name"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="1"
             android:ellipsize="end"
             android:gravity="center"
             android:maxLines="3"
             android:textSize="22sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            app:autoSizeTextType="uniform"
+            app:autoSizeMinTextSize="13sp"
+            app:autoSizeMaxTextSize="22sp"
+            app:autoSizeStepGranularity="1sp" />
 
         <TextView
             android:id="@+id/value"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:gravity="center"
+            android:maxLines="1"
             android:textSize="28sp" />
     </LinearLayout>
 </FrameLayout>
