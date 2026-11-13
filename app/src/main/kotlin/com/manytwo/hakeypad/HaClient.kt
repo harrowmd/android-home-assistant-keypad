@@ -20,7 +20,9 @@ data class EntityState(
     val deviceClass: String?,
 ) {
     val domain: String get() = entityId.substringBefore('.')
-    val isOn: Boolean get() = state == "on" || state == "open" || state == "playing"
+    val isOn: Boolean get() = state == "on" || state == "open" || state == "playing" ||
+        // climate (heaters, air con): any mode other than off counts as on
+        (domain == "climate" && state in setOf("heat", "cool", "heat_cool", "auto", "dry", "fan_only"))
     val isUnavailable: Boolean get() = state == "unavailable" || state == "unknown"
 
     companion object {

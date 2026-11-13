@@ -72,14 +72,17 @@ object Kiosk {
     }
 }
 
-/** Opens the keypad after the phone starts, if switched on in Settings (device owner only). */
+/** Opens the keypad after the phone starts or the app was updated, if switched on in Settings (device owner only). */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val boot = intent.action == Intent.ACTION_BOOT_COMPLETED
+        val updated = intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
+        if (!boot && !updated) return
         DebugLog.init(ctx)
         val prefs = Prefs(ctx)
         val owner = WifiGuard.isDeviceOwner(ctx)
-        DebugLog.add("APP", "phone started; auto start ${if (prefs.autoStart) "on" else "off"}, device owner ${if (owner) "yes" else "no"}")
+        DebugLog.add("APP", (if (boot) "phone started" else "app updated") +
+            "; auto start ${if (prefs.autoStart) "on" else "off"}, device owner ${if (owner) "yes" else "no"}")
         if (!prefs.autoStart || !owner) return
         // A device-owner app may open an activity from the background (Android 10+).
         ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

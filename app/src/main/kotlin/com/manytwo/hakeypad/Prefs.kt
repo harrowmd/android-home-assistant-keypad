@@ -96,6 +96,27 @@ class Prefs(context: Context) {
         get() = p.getString("battery_entity", "") ?: ""
         set(v) = p.edit().putString("battery_entity", v.trim()).apply()
 
+    // ---- colours ----
+
+    /** "system" (follow the phone's Dark/Light setting), "dark" or "light". */
+    var theme: String
+        get() = p.getString("theme", "system") ?: "system"
+        set(v) = p.edit().putString("theme", v).apply()
+
+    /** Own colours (ARGB); 0 = the theme's colour. */
+    var colBackground: Int
+        get() = p.getInt("col_bg", 0)
+        set(v) = p.edit().putInt("col_bg", v).apply()
+    var colText: Int
+        get() = p.getInt("col_text", 0)
+        set(v) = p.edit().putInt("col_text", v).apply()
+    var colButtonOff: Int
+        get() = p.getInt("col_off", 0)
+        set(v) = p.edit().putInt("col_off", v).apply()
+    var colButtonOn: Int
+        get() = p.getInt("col_on", 0)
+        set(v) = p.edit().putInt("col_on", v).apply()
+
     /** Optional PIN that protects Settings. Empty = no PIN. */
     var pin: String
         get() = p.getString("pin", "") ?: ""

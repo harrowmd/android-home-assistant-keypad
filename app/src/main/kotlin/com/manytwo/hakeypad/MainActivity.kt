@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
     private val main = Handler(Looper.getMainLooper())
     private lateinit var screen: ScreenControl
+    private var pal: Palette? = null
     private var batteryTick = 0
     private val battery by lazy { Battery(this, prefs) }
     private val clockRunnable = object : Runnable {
@@ -158,6 +159,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         adapter.setItems(prefs.buttons)
         grid.post { layoutTiles() }
         updateEmpty()
+        applyColours()
         screen = ScreenControl(this, prefs, findViewById(R.id.root))
         screen.start()
         batteryTick = 0
@@ -191,6 +193,22 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+    }
+
+    /** Theme (phone's Dark/Light, or fixed) and the user's own colours. */
+    private fun applyColours() {
+        val p = Palette.current(this, prefs)
+        pal = p
+        findViewById<View>(R.id.root).setBackgroundColor(p.bg)
+        // Black behind the keypad: dimming fades the keypad (root alpha) towards black, also
+        // with a light theme.
+        window.decorView.setBackgroundColor(0xFF000000.toInt())
+        @Suppress("DEPRECATION")
+        run { window.statusBarColor = p.bg; window.navigationBarColor = p.bg }
+        titleView.setTextColor(p.bar)
+        clockView.setTextColor(p.bar)
+        emptyView.setTextColor(p.bar)
+        adapter.notifyDataSetChanged()
     }
 
     private fun startClient() {
@@ -336,24 +354,52 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     // ---- the grid of tiles ----
 
     /**
-     * Autosize only checks that the text fits the box; a long word ("Dehumidifier") is then
-     * broken in the middle. Cap the largest size so the longest word fits on one line.
+     * Size a tile name: the largest size (22 sp down to 8 sp) at which it fits the box in at
+     * most 3 lines without breaking a word. Android's own autosize only checks that the text
+     * fits, so it broke "Dehumidifier" in the middle on narrow tiles.
      */
-    private fun fitLongestWord(tv: TextView, text: String) {
+    /** The ON/OFF line: 28 sp, smaller only if it doesn't fit the tile's width. */
+    private fun fitValue(tv: TextView) {
         tv.post {
             val w = tv.width - tv.paddingLeft - tv.paddingRight
             if (w <= 0) return@post
-            val longest = text.split(' ').maxByOrNull { it.length } ?: return@post
+            val text = tv.text.toString()
             val paint = android.text.TextPaint(tv.paint)
             val sp = resources.displayMetrics.scaledDensity
-            var max = 22
-            while (max > 13) {
-                paint.textSize = max * sp
-                if (paint.measureText(longest) <= w) break
-                max--
+            var size = 28
+            while (size > 12) {
+                paint.textSize = size * sp
+                if (paint.measureText(text) <= w) break
+                size--
             }
-            androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
-                tv, 13, max, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            if (tv.textSize != size * sp) tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size.toFloat())
+        }
+    }
+
+    private fun fitLongestWord(tv: TextView, text: String) {
+        tv.post {
+            val w = tv.width - tv.paddingLeft - tv.paddingRight
+            val hMax = tv.height - tv.paddingTop - tv.paddingBottom
+            if (w <= 0 || hMax <= 0 || tv.text.toString() != text) return@post
+            val paint = android.text.TextPaint(tv.paint)
+            val sp = resources.displayMetrics.scaledDensity
+            var size = 22
+            while (size > 8) {
+                paint.textSize = size * sp
+                val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
+                    .setBreakStrategy(android.text.Layout.BREAK_STRATEGY_SIMPLE)
+                    .setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE)
+                    .setIncludePad(tv.includeFontPadding)
+                    .build()
+                // A line may only end at a space (or the end): otherwise a word was broken.
+                val wordsWhole = (0 until layout.lineCount).all { l ->
+                    val end = layout.getLineEnd(l)
+                    end >= text.length || text[end - 1] == ' ' || text[end] == ' '
+                }
+                if (wordsWhole && layout.lineCount <= 3 && layout.height <= hMax) break
+                size--
+            }
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size.toFloat())
         }
     }
 
@@ -396,7 +442,23 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val v = LayoutInflater.from(parent.context).inflate(R.layout.item_tile, parent, false)
-            return VH(v)
+            val h = VH(v)
+            // Tiles change width (columns setting, rotation): size the name again for the new width.
+            h.name.addOnLayoutChangeListener { tv, l, t, r, b, ol, ot, or, ob ->
+                if (r - l != or - ol || b - t != ob - ot) fitLongestWord(tv as TextView, tv.text.toString())
+            }
+            h.value.addOnLayoutChangeListener { tv, l, _, r, _, ol, _, or, _ ->
+                if (r - l != or - ol) fitValue(tv as TextView)
+            }
+            // Narrow tiles (3-4 columns) get a smaller inner margin, so the text has room.
+            h.tile.addOnLayoutChangeListener { tile, l, _, r, _, ol, _, or, _ ->
+                if (r - l != or - ol) {
+                    val d = resources.displayMetrics.density
+                    val pad = ((r - l) * 0.06f).coerceIn(4 * d, 12 * d).toInt()
+                    if (tile.paddingLeft != pad) tile.post { tile.setPadding(pad, pad, pad, pad) }
+                }
+            }
+            return h
         }
 
         override fun onBindViewHolder(h: VH, position: Int) {
@@ -410,37 +472,39 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             val isSensor = id.startsWith("sensor.") || id.startsWith("binary_sensor.")
             val bg = h.tile.background.mutate() as GradientDrawable
 
-            val colorRes: Int
+            val p = pal ?: Palette.current(this@MainActivity, prefs)
+            val tileColour: Int
             when {
                 pending.containsKey(id) && !connected -> {
                     h.value.text = "…"        // pressed while offline: waits for the connection
-                    colorRes = R.color.tile_unavailable
+                    tileColour = p.tileUnavailable
                 }
                 s == null || !connected -> {
                     h.value.text = if (!connected) "–" else "not found"
-                    colorRes = R.color.tile_unavailable
+                    tileColour = p.tileUnavailable
                 }
                 s.isUnavailable -> {
                     h.value.text = "offline"
-                    colorRes = R.color.tile_unavailable
+                    tileColour = p.tileUnavailable
                 }
                 isSensor -> {
                     h.value.text = if (s.state.isBlank()) "–" else listOfNotNull(s.state, s.unit).joinToString(" ")
-                    colorRes = R.color.tile_sensor
+                    tileColour = p.tileSensor
                 }
                 pending.containsKey(id) -> {
                     h.value.text = "…"
-                    colorRes = if (s.isOn) R.color.tile_on else R.color.tile_off
+                    tileColour = if (s.isOn) p.tileOn else p.tileOff
                 }
                 else -> {
                     h.value.text = if (s.isOn) "ON" else if (s.state == "off") "OFF" else s.state
-                    colorRes = if (s.isOn) R.color.tile_on else R.color.tile_off
+                    tileColour = if (s.isOn) p.tileOn else p.tileOff
                 }
             }
-            bg.setColor(ContextCompat.getColor(this@MainActivity, colorRes))
-            val textColor = if (colorRes == R.color.tile_on) R.color.text_on else R.color.text_off
-            h.name.setTextColor(ContextCompat.getColor(this@MainActivity, textColor))
-            h.value.setTextColor(ContextCompat.getColor(this@MainActivity, textColor))
+            fitValue(h.value)
+            bg.setColor(tileColour)
+            val textColor = if (tileColour == p.tileOn) p.textOn else p.text
+            h.name.setTextColor(textColor)
+            h.value.setTextColor(textColor)
             h.itemView.alpha = if (pending.containsKey(id)) 0.7f else 1f
 
             if (isSensor) {

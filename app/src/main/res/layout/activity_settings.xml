@@ -281,6 +281,140 @@
             android:layout_height="wrap_content"
             android:text="Make this the Home app" />
 
+        <TextView style="@style/SettingsHeading" android:text="Colours" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:text="Theme" />
+
+        <RadioGroup
+            android:id="@+id/theme"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/theme_system"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Like the phone" />
+
+            <RadioButton
+                android:id="@+id/theme_dark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Dark" />
+
+            <RadioButton
+                android:id="@+id/theme_light"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Light" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="13sp"
+            android:text="Own colours (tap to change; \u0022Theme default\u0022 undoes it). Text on an ON button is black or white, whichever reads best." />
+
+        <LinearLayout
+            android:id="@+id/col_bg_row"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/col_bg_swatch"
+                android:layout_width="32dp"
+                android:layout_height="32dp" />
+
+            <TextView
+                android:id="@+id/col_bg_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="Background" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/col_text_row"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/col_text_swatch"
+                android:layout_width="32dp"
+                android:layout_height="32dp" />
+
+            <TextView
+                android:id="@+id/col_text_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="Text" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/col_off_row"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/col_off_swatch"
+                android:layout_width="32dp"
+                android:layout_height="32dp" />
+
+            <TextView
+                android:id="@+id/col_off_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="Button (off)" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/col_on_row"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/col_on_swatch"
+                android:layout_width="32dp"
+                android:layout_height="32dp" />
+
+            <TextView
+                android:id="@+id/col_on_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="Button (on)" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/col_reset"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="All colours back to the theme" />
+
         <TextView style="@style/SettingsHeading" android:text="Wall keypad" />
 
         <TextView
@@ -392,7 +526,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Every 15 s the keypad checks the Wi-Fi and that Home Assistant answers. If the link stays bad, or a preferred access point is clearly better, it moves the phone to the best access point and keeps it there. Repairs need HA Keypad to be device owner (see above). Android 10 does not let it switch Wi-Fi on if someone switches it off."
+            android:text="Every 15 s the keypad checks the Wi-Fi and that Home Assistant answers. If the phone drops off Wi-Fi, can't reach Home Assistant, or the signal is weak while a much stronger access point is in reach, it moves the phone to the best access point (strongest, 2.4 GHz preferred, or your list above) and keeps it there. Repairs need HA Keypad to be device owner (see above). Android 10 does not let it switch Wi-Fi on if someone switches it off."
             android:textSize="13sp" />
 
         <LinearLayout
@@ -420,6 +554,41 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Stop being device owner" />
+
+        <TextView style="@style/SettingsHeading" android:text="About" />
+
+        <TextView
+            android:id="@+id/about"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textIsSelectable="true"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_update"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Check for update" />
+
+            <Button
+                android:id="@+id/btn_github"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="GitHub page" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/update_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
 
         <LinearLayout
             android:layout_width="match_parent"

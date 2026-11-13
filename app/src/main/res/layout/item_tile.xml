@@ -29,10 +29,7 @@
             android:hyphenationFrequency="none"
             android:textSize="22sp"
             android:textStyle="bold"
-            app:autoSizeTextType="uniform"
-            app:autoSizeMinTextSize="13sp"
-            app:autoSizeMaxTextSize="22sp"
-            app:autoSizeStepGranularity="1sp" />
+            android:includeFontPadding="false" />
 
         <TextView
             android:id="@+id/value"

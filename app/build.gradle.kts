@@ -14,8 +14,8 @@ android {
         applicationId = "com.manytwo.hakeypad"
         minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.7"
+        versionCode = 9
+        versionName = "0.8"
         buildConfigField("String", "BUILD_TIME",
             "\"" + SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()) + "\"")
     }

@@ -55,6 +55,12 @@ so on a phone you carry around it costs nothing once you leave it).
 - The first touch on a very dim screen only wakes it, so nothing is switched by accident.
 - All times and levels are in Settings → Screen.
 
+## Colours
+
+Settings → Colours: **Like the phone** (follows Android's Dark/Light setting), **Dark** or
+**Light**, and optional own colours for the background, the text and the buttons (off and on),
+from a palette or as #RRGGBB. Text on an ON button is black or white, whichever reads best.
+
 ## Wall keypad
 
 For a phone that stays on the wall (needs device owner, see below; leave off on a phone you
@@ -130,6 +136,13 @@ Everything the keypad does is written to **Documents/HAKeypad/ha-keypad-log.txt*
 
 At 4 MB the file becomes ha-keypad-log-old.txt and a new one is started. The token is never
 written to the log.
+
+## About and updates
+
+Settings → About shows the version, the phone and where the log is. **Check for update** looks
+up the latest release here on GitHub and, if it is newer, downloads and installs it (settings
+are kept). A device-owner keypad updates without a question and opens again by itself; on
+other phones Android asks you to confirm, and the first time to allow HA Keypad to install apps.
 
 ## Build
 

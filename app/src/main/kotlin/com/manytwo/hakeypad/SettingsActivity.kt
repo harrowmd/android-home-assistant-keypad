@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
+import android.net.Uri
+import android.os.Build
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -71,9 +73,11 @@ class SettingsActivity : AppCompatActivity() {
         showButtons()
         setUpWifi()
         setUpScreen()
+        setUpColours()
 
         findViewById<TextView>(R.id.version).text =
             "HA Keypad ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_TIME}"
+        setUpAbout()
 
         findViewById<Button>(R.id.btn_test).setOnClickListener { test() }
         findViewById<Button>(R.id.btn_choose).setOnClickListener {
@@ -107,6 +111,109 @@ class SettingsActivity : AppCompatActivity() {
     }
     private fun et(id: Int) = findViewById<EditText>(id)
     private fun cb(id: Int) = findViewById<CheckBox>(id)
+
+    // ---- about and updates ----
+
+    private fun setUpAbout() {
+        val owner = WifiGuard.isDeviceOwner(this)
+        findViewById<TextView>(R.id.about).text = buildString {
+            append("HA Keypad ${BuildConfig.VERSION_NAME} (built ${BuildConfig.BUILD_TIME})\n")
+            append("A simple, always-on keypad for Home Assistant: big buttons for lights, fans, heaters and more, ")
+            append("with live state, a Wi-Fi guard, day/night screen and a debug log.\n\n")
+            append("Phone: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}\n")
+            append("Device owner: ${if (owner) "yes" else "no"}\n")
+            append("Debug log: ${DebugLog.where}\n")
+            append("Source, help and releases: ${Updater.PAGE}")
+        }
+        findViewById<Button>(R.id.btn_github).setOnClickListener {
+            Kiosk.off(this)
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.PAGE))) }
+            catch (e: Exception) { toast("No web browser on this phone") }
+        }
+        val status = findViewById<TextView>(R.id.update_status)
+        val btn = findViewById<Button>(R.id.btn_update)
+        btn.setOnClickListener {
+            btn.isEnabled = false
+            status.text = "Checking GitHub…"
+            Updater.latest { rel, err ->
+                btn.isEnabled = true
+                when {
+                    rel == null -> status.text = "Can't check: $err"
+                    !Updater.newer(rel.version, BuildConfig.VERSION_NAME) ->
+                        status.text = "Up to date: ${BuildConfig.VERSION_NAME} is the latest (${rel.version} on GitHub)."
+                    else -> {
+                        status.text = "New version ${rel.version} available."
+                        AlertDialog.Builder(this)
+                            .setTitle("Update to ${rel.version}?")
+                            .setMessage((rel.notes.ifBlank { "No notes." }).take(1500) +
+                                "\n\nYou have ${BuildConfig.VERSION_NAME}. Settings are kept.")
+                            .setPositiveButton("Download and install") { _, _ -> update(rel, status, btn) }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun update(rel: Updater.Release, status: TextView, btn: Button) {
+        if (!Updater.canInstall(this)) return
+        btn.isEnabled = false
+        Updater.install(this, rel, progress = { status.text = "Downloading ${rel.version}… $it %" }) { err ->
+            btn.isEnabled = true
+            status.text = if (err == null)
+                (if (WifiGuard.isDeviceOwner(this)) "Installing ${rel.version}… the keypad restarts by itself."
+                 else "Installing ${rel.version}… confirm when Android asks.")
+            else "Update failed: $err"
+        }
+    }
+
+    // ---- colours: kept here until Save ----
+    private val cols = IntArray(4)    // background, text, button off, button on (0 = theme)
+
+    private fun setUpColours() {
+        cols[0] = prefs.colBackground; cols[1] = prefs.colText; cols[2] = prefs.colButtonOff; cols[3] = prefs.colButtonOn
+        findViewById<android.widget.RadioGroup>(R.id.theme).check(when (prefs.theme) {
+            "dark" -> R.id.theme_dark; "light" -> R.id.theme_light; else -> R.id.theme_system })
+        findViewById<android.widget.RadioGroup>(R.id.theme).setOnCheckedChangeListener { _, _ -> showColours() }
+        val rows = listOf(R.id.col_bg_row to "Background", R.id.col_text_row to "Text",
+            R.id.col_off_row to "Button (off)", R.id.col_on_row to "Button (on)")
+        rows.forEachIndexed { i, (row, name) ->
+            findViewById<View>(row).setOnClickListener {
+                Palette.choose(this, name, cols[i]) { c -> cols[i] = c; showColours() }
+            }
+        }
+        findViewById<Button>(R.id.col_reset).setOnClickListener { cols.fill(0); showColours() }
+        showColours()
+    }
+
+    private fun chosenTheme() = when (findViewById<android.widget.RadioGroup>(R.id.theme).checkedRadioButtonId) {
+        R.id.theme_dark -> "dark"; R.id.theme_light -> "light"; else -> "system" }
+
+    /** Show what each colour will be (own colour, or the theme's). */
+    private fun showColours() {
+        val saved = listOf(prefs.theme, prefs.colBackground, prefs.colText, prefs.colButtonOff, prefs.colButtonOn)
+        // Work out the palette as it would be after Save, without saving.
+        prefs.theme = chosenTheme(); prefs.colBackground = cols[0]; prefs.colText = cols[1]; prefs.colButtonOff = cols[2]; prefs.colButtonOn = cols[3]
+        val p = Palette.current(this, prefs)
+        prefs.theme = saved[0] as String; prefs.colBackground = saved[1] as Int; prefs.colText = saved[2] as Int
+        prefs.colButtonOff = saved[3] as Int; prefs.colButtonOn = saved[4] as Int
+        val shown = listOf(p.bg, p.text, p.tileOff, p.tileOn)
+        val ids = listOf(
+            Triple(R.id.col_bg_swatch, R.id.col_bg_text, "Background"),
+            Triple(R.id.col_text_swatch, R.id.col_text_text, "Text"),
+            Triple(R.id.col_off_swatch, R.id.col_off_text, "Button (off)"),
+            Triple(R.id.col_on_swatch, R.id.col_on_text, "Button (on)"))
+        ids.forEachIndexed { i, (sw, tx, name) ->
+            Palette.swatch(findViewById(sw), shown[i])
+            findViewById<TextView>(tx).text = "$name: " + if (cols[i] == 0) "theme (${Palette.hex(shown[i])})" else Palette.hex(cols[i])
+        }
+    }
+
+    private fun saveColours() {
+        prefs.theme = chosenTheme()
+        prefs.colBackground = cols[0]; prefs.colText = cols[1]; prefs.colButtonOff = cols[2]; prefs.colButtonOn = cols[3]
+    }
 
     private fun setUpScreen() {
         et(R.id.day_start).setText(hhmm(prefs.dayStart))
@@ -176,6 +283,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs.pin = pin.text.toString()
         prefs.buttons = buttons
         saveScreen()
+        saveColours()
         prefs.wifiGuard = wifiGuardBox.isChecked
         prefs.wifiSsid = wifiSsid.text.toString()
         prefs.wifiAps = wifiAps.text.toString()
