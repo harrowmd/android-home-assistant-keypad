@@ -145,7 +145,7 @@ class SettingsActivity : AppCompatActivity() {
                         status.text = "New version ${rel.version} available."
                         AlertDialog.Builder(this)
                             .setTitle("Update to ${rel.version}?")
-                            .setMessage((rel.notes.ifBlank { "No notes." }).take(1500) +
+                            .setMessage(plain(rel.notes).ifBlank { "No notes." }.take(1500) +
                                 "\n\nYou have ${BuildConfig.VERSION_NAME}. Settings are kept.")
                             .setPositiveButton("Download and install") { _, _ -> update(rel, status, btn) }
                             .setNegativeButton(android.R.string.cancel, null)
@@ -155,6 +155,14 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
     }
+
+    /** GitHub release notes are Markdown: show them as plain text. */
+    private fun plain(md: String) = md
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+        .replace(Regex("(?<![\\w*])\\*(\\S.*?)\\*(?![\\w*])"), "$1")
+        .replace(Regex("`([^`]*)`"), "$1")
+        .replace(Regex("(?m)^- "), "• ")
+        .trim()
 
     private fun update(rel: Updater.Release, status: TextView, btn: Button) {
         if (!Updater.canInstall(this)) return
