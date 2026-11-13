@@ -54,20 +54,25 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
                 val first = lastNetwork == null
                 val changed = network != lastNetwork
                 lastNetwork = network
-                if (!first && changed) client?.reconnectNow()
+                DebugLog.add("NET", "Wi-Fi network available" + if (first) "" else if (changed) " (new)" else " (same)")
+                if (!first && changed) client?.reconnectNow("phone rejoined Wi-Fi")
             }
         }
+        override fun onLost(network: Network) { DebugLog.add("NET", "Wi-Fi network lost") }
     }
     private lateinit var wifiGuard: WifiGuard
     private val states = HashMap<String, EntityState>()
     private val pending = HashMap<String, Long>()   // entity id → time pressed
 
     private val main = Handler(Looper.getMainLooper())
-    private var dimmed = false
-    private val dimRunnable = Runnable { setDimmed(true) }
+    private lateinit var screen: ScreenControl
+    private var batteryTick = 0
+    private val battery by lazy { Battery(this, prefs) }
     private val clockRunnable = object : Runnable {
         override fun run() {
             clockView.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            screen.tick()
+            if (batteryTick++ % 10 == 0) battery.report(client)
             main.postDelayed(this, 1000L * (60 - (System.currentTimeMillis() / 1000) % 60))
         }
     }
@@ -88,13 +93,16 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             append("\n\n").append(wifiGuard.status)
         }
         val wasShown = offlineView.visibility == View.VISIBLE
+        if (!wasShown) DebugLog.add("APP", "red offline panel shown (offline since $since)")
         offlineView.visibility = View.VISIBLE
-        if (wake && !wasShown) setDimmed(false)   // make sure it is noticed
+        if (wake && !wasShown) screen.wake("offline warning")   // make sure it is noticed
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugLog.init(this)
         prefs = Prefs(this)
+        Kiosk.showOverLockScreen(this, prefs)
         setContentView(R.layout.activity_main)
         titleView = findViewById(R.id.title)
         clockView = findViewById(R.id.clock)
@@ -125,6 +133,10 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         emptyView.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
 
         // Watches the Wi-Fi all the time the keypad exists, not only while it is on screen.
+        DebugLog.add("APP", "started: ${DebugLog.deviceLine(this)}")
+        DebugLog.add("APP", "server ${android.net.Uri.parse(prefs.serverUrl).host ?: "not set"}, " +
+            "${prefs.buttons.size} tiles, device owner ${if (WifiGuard.isDeviceOwner(this)) "yes" else "no"}, " +
+            "Wi-Fi guard ${if (prefs.wifiGuard) "on" else "off"}, log ${DebugLog.where}")
         wifiGuard = WifiGuard(this, prefs).also {
             it.onStatus = { if (offlineView.visibility == View.VISIBLE) showOffline(wake = false) }
             it.start()
@@ -138,6 +150,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
     override fun onResume() {
         super.onResume()
+        DebugLog.add("APP", "keypad on screen")
         hideSystemBars()
         titleView.text = prefs.title
         val cols = prefs.columns
@@ -145,15 +158,19 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         adapter.setItems(prefs.buttons)
         grid.post { layoutTiles() }
         updateEmpty()
+        screen = ScreenControl(this, prefs, findViewById(R.id.root))
+        screen.start()
+        batteryTick = 0
         main.post(clockRunnable)
         startClient()
-        setDimmed(false)
+        Kiosk.apply(this, prefs)
     }
 
     override fun onPause() {
         super.onPause()
+        DebugLog.add("APP", "keypad left the screen")
         main.removeCallbacks(clockRunnable)
-        main.removeCallbacks(dimRunnable)
+        screen.stop()
         main.removeCallbacks(offlineRunnable)
         offlineSince = 0L
         offlineView.visibility = View.GONE
@@ -199,12 +216,12 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            if (dimmed) {
-                setDimmed(false)
+            if (screen.swallowTouch) {
+                screen.touched()
                 swallowUntilUp = true
                 return true
             }
-            scheduleDim()
+            screen.touched()
         }
         if (swallowUntilUp) {
             if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) swallowUntilUp = false
@@ -213,22 +230,6 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         return super.dispatchTouchEvent(ev)
     }
     private var swallowUntilUp = false
-
-    private fun scheduleDim() {
-        main.removeCallbacks(dimRunnable)
-        val s = prefs.dimAfterSec
-        if (s > 0) main.postDelayed(dimRunnable, s * 1000L)
-    }
-
-    private fun setDimmed(d: Boolean) {
-        dimmed = d
-        val lp = window.attributes
-        lp.screenBrightness = if (d) prefs.dimPercent / 100f
-            else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        window.attributes = lp
-        findViewById<View>(R.id.root).alpha = if (d) 0.5f else 1f
-        if (!d) scheduleDim()
-    }
 
     // ---- settings ----
 
@@ -266,6 +267,8 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         if (detail.isNotBlank()) lastDetail = detail
         when {
             connected -> {
+                battery.send(client)
+                if (offlineSince > 0 && System.currentTimeMillis() - offlineSince > 2000) DebugLog.add("APP", "back online after ${(System.currentTimeMillis() - offlineSince) / 1000} s offline")
                 offlineSince = 0L
                 lastDetail = ""
                 main.removeCallbacks(offlineRunnable)
@@ -300,8 +303,14 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     }
 
     override fun onStateChanged(state: EntityState) {
+        val old = states[state.entityId]
         states[state.entityId] = state
-        pending.remove(state.entityId)
+        val pressedAt = pending.remove(state.entityId)
+        if (state.entityId in prefs.buttons && old?.state != state.state) {
+            DebugLog.add("STATE", "${state.entityId} ${old?.state ?: "?"} → ${state.state}" +
+                if (pressedAt != null) " (${System.currentTimeMillis() - pressedAt} ms after the press)" else " (switched elsewhere)")
+            if (pressedAt == null && prefs.wakeOnChange && old != null) screen.wake("${state.name} switched elsewhere")
+        }
         adapter.refresh(state.entityId)
     }
 
@@ -311,7 +320,9 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     }
 
     private fun press(entityId: String, v: View) {
-        val c = client ?: return
+        val c = client ?: run { DebugLog.add("PRESS", "$entityId pressed, but not set up"); return }
+        DebugLog.add("PRESS", "tile pressed: ${prefs.label(entityId) ?: states[entityId]?.name ?: entityId}" +
+            " (shows ${states[entityId]?.state ?: "?"}, ${if (connected) "online" else "OFFLINE"})")
         v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         pending[entityId] = System.currentTimeMillis()
         adapter.refresh(entityId)
@@ -323,6 +334,28 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     }
 
     // ---- the grid of tiles ----
+
+    /**
+     * Autosize only checks that the text fits the box; a long word ("Dehumidifier") is then
+     * broken in the middle. Cap the largest size so the longest word fits on one line.
+     */
+    private fun fitLongestWord(tv: TextView, text: String) {
+        tv.post {
+            val w = tv.width - tv.paddingLeft - tv.paddingRight
+            if (w <= 0) return@post
+            val longest = text.split(' ').maxByOrNull { it.length } ?: return@post
+            val paint = android.text.TextPaint(tv.paint)
+            val sp = resources.displayMetrics.scaledDensity
+            var max = 22
+            while (max > 13) {
+                paint.textSize = max * sp
+                if (paint.measureText(longest) <= w) break
+                max--
+            }
+            androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                tv, 13, max, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+        }
+    }
 
     private var tileHeight = 0
 
@@ -373,6 +406,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
 
             val label = prefs.label(id) ?: s?.name ?: prefs.cachedName(id) ?: id
             h.name.text = label
+            fitLongestWord(h.name, label)
             val isSensor = id.startsWith("sensor.") || id.startsWith("binary_sensor.")
             val bg = h.tile.background.mutate() as GradientDrawable
 

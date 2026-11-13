@@ -122,15 +122,25 @@ class HaClient(
             .put("target", JSONObject().put("entity_id", entityId))
         val p = Press(entityId, body, repeatable, System.currentTimeMillis())
         presses[entityId] = p          // a newer press of the same tile replaces an older one
+        DebugLog.add("PRESS", "$entityId → $service" + if (authOk) "" else " (offline: held until connected)")
         // Not logged in: send it when we are. Only start a new connection if none is under way.
         if (authOk) sendPress(p)
-        else if (ws == null || System.currentTimeMillis() - connectStarted > 10_000) reconnectNow()
+        else if (ws == null || System.currentTimeMillis() - connectStarted > 10_000) reconnectNow("press while offline")
         main.removeCallbacks(pressCheck)
         main.postDelayed(pressCheck, 500)
     }
 
+    /** Call a service now (no retry). False if not connected. */
+    fun callService(domain: String, service: String, entityId: String, data: JSONObject): Boolean {
+        if (!authOk) return false
+        send(JSONObject().put("type", "call_service").put("domain", domain).put("service", service)
+            .put("service_data", data).put("target", JSONObject().put("entity_id", entityId)))
+        return true
+    }
+
     private fun sendPress(p: Press) {
         val o = JSONObject(p.body.toString())
+        if (p.sentAt > 0) DebugLog.add("PRESS", "${p.entityId} sent again (no answer yet)")
         p.msgId = nextId
         p.sentAt = System.currentTimeMillis()
         send(o)
@@ -145,13 +155,14 @@ class HaClient(
                 when {
                     now - p.since > PRESS_GIVE_UP_MS -> {
                         presses.remove(p.entityId)
+                        DebugLog.add("PRESS", "${p.entityId} GAVE UP after ${(now - p.since) / 1000} s: not switched")
                         listener.onPressFailed(p.entityId)
                     }
                     authOk && p.sentAt > 0 && now - p.sentAt > PRESS_ACK_MS -> stale = true
                 }
             }
             // A press got no answer: the socket is dead without knowing it. Start again.
-            if (stale) reconnectNow()
+            if (stale) reconnectNow("a press got no answer in ${PRESS_ACK_MS} ms")
             if (presses.isNotEmpty()) main.postDelayed(this, 500)
         }
     }
@@ -160,9 +171,15 @@ class HaClient(
     private fun resendPresses() {
         for (p in presses.values.toList()) {
             if (p.sentAt == 0L || p.repeatable) sendPress(p)
-            else { presses.remove(p.entityId); listener.onPressFailed(p.entityId) }  // may have run: don't run twice
+            else {   // may have run already: don't run it twice
+                presses.remove(p.entityId)
+                DebugLog.add("PRESS", "${p.entityId} not repeated (a script/scene/button may already have run)")
+                listener.onPressFailed(p.entityId)
+            }
         }
     }
+
+    private fun hostOnly(): String = try { android.net.Uri.parse(serverUrl).host ?: "?" } catch (_: Exception) { "?" }
 
     private fun wsUrl(): String {
         val base = serverUrl.trim().trimEnd('/')
@@ -178,6 +195,7 @@ class HaClient(
         if (stopped) return
         authOk = false
         connectStarted = System.currentTimeMillis()
+        DebugLog.add("HA", "connecting to ${hostOnly()}")
         post { listener.onConnection(Status.CONNECTING) }
         val req = try {
             Request.Builder().url(wsUrl()).build()
@@ -190,12 +208,15 @@ class HaClient(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (webSocket != ws) return
+                DebugLog.add("HA", "connection FAILED: ${t.javaClass.simpleName}: ${t.message}" +
+                    (response?.let { " (HTTP ${it.code})" } ?: "") + "; next try in ${retryDelayMs / 1000} s")
                 post { listener.onConnection(Status.DISCONNECTED, t.message ?: t.javaClass.simpleName) }
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (webSocket != ws) return
+                DebugLog.add("HA", "connection closed by server: $code $reason")
                 post { listener.onConnection(Status.DISCONNECTED, reason) }
                 scheduleReconnect()
             }
@@ -216,8 +237,9 @@ class HaClient(
      * The phone has (re)joined a network: connect again at once instead of waiting out the
      * retry delay, and drop the old socket, which may be dead without knowing it yet.
      */
-    fun reconnectNow() {
+    fun reconnectNow(why: String = "") {
         if (stopped) return
+        DebugLog.add("HA", "reconnecting now${if (why.isNotEmpty()) ": $why" else ""}")
         main.removeCallbacks(reconnect)
         retryDelayMs = 2000L
         val old = ws
@@ -236,12 +258,14 @@ class HaClient(
         when (msg.optString("type")) {
             "auth_required" -> send(JSONObject().put("type", "auth").put("access_token", token))
             "auth_invalid" -> {
+                DebugLog.add("HA", "token REJECTED: ${msg.optString("message")}")
                 stopped = true   // a wrong token won't fix itself; wait for new settings
                 post { listener.onConnection(Status.AUTH_FAILED, msg.optString("message")) }
                 ws?.close(1000, "auth invalid")
             }
             "auth_ok" -> {
                 authOk = true
+                DebugLog.add("HA", "connected, logged in after ${System.currentTimeMillis() - connectStarted} ms (HA ${msg.optString("ha_version")})")
                 retryDelayMs = 2000L
                 post { listener.onConnection(Status.CONNECTED) }
                 getStatesId = nextId
@@ -251,7 +275,17 @@ class HaClient(
             }
             "result" -> if (msg.optInt("id") != getStatesId) {
                 val id = msg.optInt("id")
-                post { presses.values.firstOrNull { it.msgId == id }?.let { presses.remove(it.entityId) } }
+                val okRes = msg.optBoolean("success")
+                val err = msg.optJSONObject("error")?.optString("message")
+                post {
+                    presses.values.firstOrNull { it.msgId == id }?.let {
+                        presses.remove(it.entityId)
+                        val ms = System.currentTimeMillis() - it.sentAt
+                        val total = System.currentTimeMillis() - it.since
+                        DebugLog.add("PRESS", "${it.entityId} " + (if (okRes) "confirmed by HA in $ms ms" else "REFUSED by HA: $err") +
+                            if (total - ms > 200) " ($total ms after the press)" else "")
+                    }
+                }
             } else if (msg.optBoolean("success")) {
                 val arr = msg.optJSONArray("result") ?: JSONArray()
                 val map = HashMap<String, EntityState>()

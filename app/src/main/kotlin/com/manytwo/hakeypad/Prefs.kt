@@ -31,10 +31,70 @@ class Prefs(context: Context) {
         get() = p.getInt("dim_after", 60)
         set(v) = p.edit().putInt("dim_after", v.coerceAtLeast(0)).apply()
 
-    /** Screen brightness while dimmed, 1-100 %. */
+    /** Night brightness when idle (dimmed), 1-100 %. */
     var dimPercent: Int
         get() = p.getInt("dim_percent", 3)
         set(v) = p.edit().putInt("dim_percent", v.coerceIn(1, 100)).apply()
+
+    // ---- day / night brightness ----
+
+    /** Day starts and ends, minutes after midnight (default 07:00-23:00). Outside = night. */
+    var dayStart: Int
+        get() = p.getInt("day_start", 7 * 60)
+        set(v) = p.edit().putInt("day_start", v.coerceIn(0, 1439)).apply()
+    var dayEnd: Int
+        get() = p.getInt("day_end", 23 * 60)
+        set(v) = p.edit().putInt("day_end", v.coerceIn(0, 1439)).apply()
+
+    /** Daytime brightness when in use: -1 = automatic from the light sensor, 0 = the phone's own setting, 1-100 %. */
+    var dayLevel: Int
+        get() = p.getInt("day_level", -1)
+        set(v) = p.edit().putInt("day_level", v.coerceIn(-1, 100)).apply()
+
+    /** Daytime brightness when nobody has touched it for dimAfterSec, 1-100 %. */
+    var dayIdlePercent: Int
+        get() = p.getInt("day_idle", 30)
+        set(v) = p.edit().putInt("day_idle", v.coerceIn(1, 100)).apply()
+
+    /** Night brightness when woken, 1-100 %. (Night idle = dimPercent.) */
+    var nightWakePercent: Int
+        get() = p.getInt("night_wake", 20)
+        set(v) = p.edit().putInt("night_wake", v.coerceIn(1, 100)).apply()
+
+    /** What brightens the screen besides a touch. */
+    var wakeOnLight: Boolean
+        get() = p.getBoolean("wake_light", true)
+        set(v) = p.edit().putBoolean("wake_light", v).apply()
+    /** Movement nearby: a shadow changes the room light by this much, %. */
+    var wakeOnMotion: Boolean
+        get() = p.getBoolean("wake_motion", true)
+        set(v) = p.edit().putBoolean("wake_motion", v).apply()
+    var motionPercent: Int
+        get() = p.getInt("motion_percent", 15)
+        set(v) = p.edit().putInt("motion_percent", v.coerceIn(3, 80)).apply()
+    var wakeOnProximity: Boolean
+        get() = p.getBoolean("wake_prox", true)
+        set(v) = p.edit().putBoolean("wake_prox", v).apply()
+    var wakeOnChange: Boolean
+        get() = p.getBoolean("wake_change", true)
+        set(v) = p.edit().putBoolean("wake_change", v).apply()
+
+    // ---- wall keypad (need device owner) ----
+
+    /** Open the keypad when the phone starts. */
+    var autoStart: Boolean
+        get() = p.getBoolean("auto_start", false)
+        set(v) = p.edit().putBoolean("auto_start", v).apply()
+
+    /** Kiosk: pin the keypad on screen (Android lock task mode). */
+    var kiosk: Boolean
+        get() = p.getBoolean("kiosk", false)
+        set(v) = p.edit().putBoolean("kiosk", v).apply()
+
+    /** input_number entity in Home Assistant that gets the battery level. Empty = off. */
+    var batteryEntity: String
+        get() = p.getString("battery_entity", "") ?: ""
+        set(v) = p.edit().putString("battery_entity", v.trim()).apply()
 
     /** Optional PIN that protects Settings. Empty = no PIN. */
     var pin: String

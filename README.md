@@ -17,8 +17,7 @@ replace the phone's home screen so it always comes back.
 - Live state: Home Assistant's WebSocket API, so a button changes the moment the device does,
   even if it was switched from the wall, the eWeLink/Smart Life app or an automation.
 - Sensor tiles (temperature, humidity, any `sensor.*`) that are shown but not pressable.
-- Full screen, screen kept on, dims after a set time. The first touch on a dimmed screen only
-  wakes it, so nothing is switched by accident.
+- Full screen, screen kept on, day/night brightness, wakes on room light, a wave or activity.
 - Can be set as the phone's **Home app**, so it returns after a reboot or a Home press.
   Back does nothing.
 - Settings are hidden: hold the title for 2 seconds, with an optional PIN.
@@ -39,6 +38,40 @@ Android 10 or newer.
 5. Tap **Test connection**, then **Choose buttons**, tick the devices you want and tap **Done**.
 6. Set the title (for example "Master bedroom"), then **Save**.
 7. Optional: **Make this the Home app** and choose HA Keypad, so it is always on screen.
+
+## Screen: day and night
+
+The screen stays on while the keypad is open (it never keeps the screen on in the background,
+so on a phone you carry around it costs nothing once you leave it).
+
+- **Day** (default 07:00–23:00): in use, the brightness follows the room light (light sensor),
+  or the phone's own setting, or a fixed level. After 60 s without a touch it drops to a
+  medium level (30 %).
+- **Night**: idle it is very dim (3 %) with the tiles darkened too; woken, 20 %.
+- Besides a touch, it brightens when the **room light goes on**, when **someone moves nearby**
+  (a shadow changes the light on the light sensor; sensitivity adjustable), when a **hand comes
+  within about 5 cm of the top of the phone** (proximity sensor), or when a **device on the keypad is switched
+  elsewhere** (someone is in the room). Each can be switched off.
+- The first touch on a very dim screen only wakes it, so nothing is switched by accident.
+- All times and levels are in Settings → Screen.
+
+## Wall keypad
+
+For a phone that stays on the wall (needs device owner, see below; leave off on a phone you
+carry around):
+
+- **Open the keypad when the phone starts**: after a power cut or reboot it comes back by
+  itself, without being the Home app.
+- **Kiosk**: the keypad stays on screen; Home, Recents and the status bar do nothing. Settings
+  (hold the title, optional PIN) still opens, and turning kiosk off there frees the phone.
+- With either on, the keypad shows over the lock screen and turns the screen on, the swipe lock
+  screen is switched off, and the screen stays on while charging. (Without this, a keypad that
+  opened behind the lock screen after a reboot had its screen go off, and Android then cut it
+  off from the Wi-Fi details and Home Assistant until someone woke the phone.)
+- **Battery**: the level, charging and temperature go to the debug log every 10 minutes. Set an
+  `input_number` (0–100) in Settings to send the level to Home Assistant. A phone on charge all
+  the time ages its battery fast; with a smart plug on the charger, a Home Assistant automation
+  can keep it between about 40 and 80 %.
 
 ## Wi-Fi guard
 
@@ -79,6 +112,24 @@ Limits on Android 10 (Android 11+ is less strict):
   stays on the last access point it chose. To free it: Android Settings → Wi-Fi → your network →
   Forget, then join it again with the password.
 - A device-owner app can't be force-stopped or uninstalled until device owner is removed.
+
+## Debug log
+
+Everything the keypad does is written to **Documents/HAKeypad/ha-keypad-log.txt** on the phone
+(open it with any file manager, or `adb pull /sdcard/Documents/HAKeypad/ha-keypad-log.txt`):
+
+- every press: the tile, what was sent, when Home Assistant confirmed it and when the device
+  changed, or that it was held while offline, sent again, or given up
+- state changes of the keypad's devices, also when they are switched elsewhere
+- the connection to Home Assistant: connecting, connected, every failure with the reason
+- every failed Home Assistant check (every 15 s), with the access point, signal and whether
+  the router answers, plus a summary line each minute: access point (BSSID), signal,
+  frequency, link speed, checks OK/lost, average and worst response time
+- Wi-Fi changes and everything the Wi-Fi guard does
+- app start, screen on/off, dim/wake, the red offline panel, crashes
+
+At 4 MB the file becomes ha-keypad-log-old.txt and a new one is started. The token is never
+written to the log.
 
 ## Build
 

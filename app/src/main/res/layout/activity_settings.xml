@@ -11,12 +11,26 @@
 
         <TextView style="@style/SettingsHeading" android:text="Home Assistant" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Home Assistant address" />
+
         <EditText
             android:id="@+id/server"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Server, e.g. https://home.example.com:8123"
             android:inputType="textUri" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Long-lived access token" />
 
         <EditText
             android:id="@+id/token"
@@ -68,12 +82,26 @@
 
         <TextView style="@style/SettingsHeading" android:text="Screen" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Title at the top of the keypad (e.g. the room)" />
+
         <EditText
             android:id="@+id/title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Title at the top, e.g. Master bedroom"
             android:inputType="textCapSentences" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Number of tile columns (1-4)" />
 
         <EditText
             android:id="@+id/columns"
@@ -82,19 +110,163 @@
             android:hint="Columns (1-4)"
             android:inputType="number" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Day from – to (HH:MM). The rest is night." />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/day_start"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="07:00"
+                android:inputType="time" />
+
+            <EditText
+                android:id="@+id/day_end"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="23:00"
+                android:inputType="time" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Day brightness in use, %. Empty = automatic (light sensor), 0 = the phone's own setting." />
+
+        <EditText
+            android:id="@+id/day_level"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="automatic"
+            android:inputType="number" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Dim after this many seconds without a touch (0 = never)" />
+
         <EditText
             android:id="@+id/dim_after"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Dim after (seconds, 0 = never)"
+            android:hint="60"
             android:inputType="number" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Day brightness when idle, %" />
+
+        <EditText
+            android:id="@+id/day_idle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="30"
+            android:inputType="number" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Night brightness when idle, % (the tiles are darkened too)" />
 
         <EditText
             android:id="@+id/dim_percent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Dimmed brightness (1-100 %)"
+            android:hint="3"
             android:inputType="number" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Night brightness when woken, %" />
+
+        <EditText
+            android:id="@+id/night_wake"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="20"
+            android:inputType="number" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Besides a touch, brighten the screen when:" />
+
+        <CheckBox
+            android:id="@+id/wake_light"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="the room light goes on (light sensor)" />
+
+        <CheckBox
+            android:id="@+id/wake_motion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="someone moves nearby (a shadow on the light sensor)" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="32dp"
+            android:textSize="13sp"
+            android:text="Movement sensitivity: light change in %. Smaller = more sensitive (5 = very, 15 = normal, 30 = only close by)" />
+
+        <EditText
+            android:id="@+id/motion_percent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="32dp"
+            android:hint="15"
+            android:inputType="number" />
+
+        <CheckBox
+            android:id="@+id/wake_prox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="a hand comes within about 5 cm of the top of the phone (proximity sensor)" />
+
+        <CheckBox
+            android:id="@+id/wake_change"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="a device on the keypad is switched elsewhere" />
+
+        <TextView
+            android:id="@+id/screen_note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="PIN to open Settings (empty = no PIN)" />
 
         <EditText
             android:id="@+id/pin"
@@ -108,6 +280,46 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Make this the Home app" />
+
+        <TextView style="@style/SettingsHeading" android:text="Wall keypad" />
+
+        <TextView
+            android:id="@+id/wall_note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
+
+        <CheckBox
+            android:id="@+id/auto_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open the keypad when the phone starts" />
+
+        <CheckBox
+            android:id="@+id/kiosk"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Kiosk: keep the keypad on screen (Home and Recents do nothing; leave via Settings)" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Battery: send the level to this Home Assistant input_number (empty = off), e.g. input_number.keypad_battery" />
+
+        <EditText
+            android:id="@+id/battery_entity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="input_number.…"
+            android:inputType="text" />
+
+        <TextView
+            android:id="@+id/battery_now"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
 
         <TextView style="@style/SettingsHeading" android:text="Wi-Fi" />
 
@@ -131,12 +343,26 @@
             android:layout_height="wrap_content"
             android:text="Look after the Wi-Fi connection" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Wi-Fi network to look after (empty = the current one)" />
+
         <EditText
             android:id="@+id/wifi_ssid"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Wi-Fi network name (empty = the current one)"
             android:inputType="text" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Preferred access points, best first (optional; empty = automatic)" />
 
         <EditText
             android:id="@+id/wifi_aps"
@@ -148,6 +374,13 @@
             android:minLines="2"
             android:textSize="13sp"
             android:typeface="monospace" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:text="Weakest usable signal, dBm" />
 
         <EditText
             android:id="@+id/wifi_min_rssi"

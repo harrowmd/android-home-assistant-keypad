@@ -70,6 +70,7 @@ class SettingsActivity : AppCompatActivity() {
         buttons = prefs.buttons.toMutableList()
         showButtons()
         setUpWifi()
+        setUpScreen()
 
         findViewById<TextView>(R.id.version).text =
             "HA Keypad ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_TIME}"
@@ -86,10 +87,83 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btn_home).setOnClickListener {
             // Lets the user pick this app as the Home app, so it is always on screen.
+            Kiosk.off(this)    // Android's own settings can't open in kiosk mode
             startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
         }
         findViewById<Button>(R.id.btn_save).setOnClickListener { save(); finish() }
         findViewById<Button>(R.id.btn_cancel).setOnClickListener { finish() }
+    }
+
+    // ---- screen (day/night, wake) and wall keypad ----
+
+    private fun hhmm(m: Int) = String.format(java.util.Locale.US, "%02d:%02d", m / 60, m % 60)
+    private fun parseHhmm(t: String, default: Int): Int {
+        val p = t.trim().split(':', '.', ' ').filter { it.isNotEmpty() }.mapNotNull { it.toIntOrNull() }
+        return when (p.size) {
+            1 -> if (p[0] in 0..23) p[0] * 60 else default
+            2 -> if (p[0] in 0..23 && p[1] in 0..59) p[0] * 60 + p[1] else default
+            else -> default
+        }
+    }
+    private fun et(id: Int) = findViewById<EditText>(id)
+    private fun cb(id: Int) = findViewById<CheckBox>(id)
+
+    private fun setUpScreen() {
+        et(R.id.day_start).setText(hhmm(prefs.dayStart))
+        et(R.id.day_end).setText(hhmm(prefs.dayEnd))
+        et(R.id.day_level).setText(if (prefs.dayLevel == -1) "" else prefs.dayLevel.toString())
+        et(R.id.day_idle).setText(prefs.dayIdlePercent.toString())
+        et(R.id.night_wake).setText(prefs.nightWakePercent.toString())
+        cb(R.id.wake_light).isChecked = prefs.wakeOnLight
+        cb(R.id.wake_prox).isChecked = prefs.wakeOnProximity
+        cb(R.id.wake_motion).isChecked = prefs.wakeOnMotion
+        et(R.id.motion_percent).setText(prefs.motionPercent.toString())
+        cb(R.id.wake_change).isChecked = prefs.wakeOnChange
+        val sm = getSystemService(android.hardware.SensorManager::class.java)
+        val hasLight = sm.getDefaultSensor(android.hardware.Sensor.TYPE_LIGHT) != null
+        val hasProx = sm.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY) != null
+        cb(R.id.wake_light).isEnabled = hasLight
+        cb(R.id.wake_motion).isEnabled = hasLight
+        cb(R.id.wake_prox).isEnabled = hasProx
+        findViewById<TextView>(R.id.screen_note).text = buildString {
+            append("The screen stays on only while the keypad is open. ")
+            if (!hasLight) append("This phone has no light sensor: \"automatic\" uses the phone's own setting. ")
+            if (!hasProx) append("This phone has no proximity sensor. ")
+            append("The first touch on a very dim screen only wakes it.")
+        }
+
+        val owner = WifiGuard.isDeviceOwner(this)
+        cb(R.id.auto_start).isChecked = prefs.autoStart
+        cb(R.id.kiosk).isChecked = prefs.kiosk
+        cb(R.id.auto_start).isEnabled = owner
+        cb(R.id.kiosk).isEnabled = owner
+        findViewById<TextView>(R.id.wall_note).text = if (owner)
+            "For a phone that stays on the wall. Leave these off on a phone you carry around."
+        else
+            "Opening at start-up and kiosk need HA Keypad to be device owner (see Wi-Fi below). Not needed on a phone you carry around."
+        et(R.id.battery_entity).setText(prefs.batteryEntity)
+        findViewById<TextView>(R.id.battery_now).text = "Battery now: " + Battery(this, prefs).describe() +
+            ". On charge all the time? Then a smart plug on the charger, switched by Home Assistant to keep 40-80 %, makes the battery last much longer."
+    }
+
+    private fun saveScreen() {
+        prefs.dayStart = parseHhmm(et(R.id.day_start).text.toString(), 7 * 60)
+        prefs.dayEnd = parseHhmm(et(R.id.day_end).text.toString(), 23 * 60)
+        prefs.dayLevel = et(R.id.day_level).text.toString().trim().let { if (it.isEmpty()) -1 else it.toIntOrNull() ?: -1 }
+        prefs.dayIdlePercent = et(R.id.day_idle).text.toString().toIntOrNull() ?: 30
+        prefs.nightWakePercent = et(R.id.night_wake).text.toString().toIntOrNull() ?: 20
+        prefs.wakeOnLight = cb(R.id.wake_light).isChecked
+        prefs.wakeOnProximity = cb(R.id.wake_prox).isChecked
+        prefs.wakeOnMotion = cb(R.id.wake_motion).isChecked
+        prefs.motionPercent = et(R.id.motion_percent).text.toString().toIntOrNull() ?: 15
+        prefs.wakeOnChange = cb(R.id.wake_change).isChecked
+        prefs.autoStart = cb(R.id.auto_start).isChecked
+        prefs.kiosk = cb(R.id.kiosk).isChecked
+        prefs.batteryEntity = et(R.id.battery_entity).text.toString()
+        DebugLog.add("APP", "settings saved: day ${hhmm(prefs.dayStart)}-${hhmm(prefs.dayEnd)}, day level ${prefs.dayLevel}, " +
+            "idle ${prefs.dayIdlePercent}/${prefs.dimPercent} %, night wake ${prefs.nightWakePercent} %, " +
+            "wake light/motion(${prefs.motionPercent} %)/prox/change ${prefs.wakeOnLight}/${prefs.wakeOnMotion}/${prefs.wakeOnProximity}/${prefs.wakeOnChange}, " +
+            "auto start ${prefs.autoStart}, kiosk ${prefs.kiosk}, battery entity ${prefs.batteryEntity.ifBlank { "none" }}")
     }
 
     private fun save() {
@@ -101,6 +175,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs.dimPercent = dimPercent.text.toString().toIntOrNull() ?: 3
         prefs.pin = pin.text.toString()
         prefs.buttons = buttons
+        saveScreen()
         prefs.wifiGuard = wifiGuardBox.isChecked
         prefs.wifiSsid = wifiSsid.text.toString()
         prefs.wifiAps = wifiAps.text.toString()
@@ -121,7 +196,7 @@ class SettingsActivity : AppCompatActivity() {
         buttons.forEachIndexed { i, id ->
             val row = LayoutInflater.from(this).inflate(R.layout.item_button_row, buttonList, false)
             row.findViewById<TextView>(R.id.row_name).text =
-                (prefs.label(id)?.let { "$it  " } ?: "") + id
+                (prefs.label(id) ?: prefs.cachedName(id))?.let { "$it\n$id" } ?: id
             row.findViewById<View>(R.id.row_up).setOnClickListener {
                 if (i > 0) { buttons.add(i - 1, buttons.removeAt(i)); showButtons() }
             }
@@ -171,7 +246,8 @@ class SettingsActivity : AppCompatActivity() {
             // Newest first, without the year, in small type so a line fits the screen.
             val lines = guard.log.lines().takeLast(200).reversed().map { it.removeRange(0, minOf(5, it.length)) }
             val text = TextView(this).apply {
-                text = if (lines.isEmpty()) "Nothing yet." else lines.joinToString("\n")
+                text = "Full debug log (presses, connection, every Home Assistant check): ${DebugLog.where}\n\n" +
+                    (if (lines.isEmpty()) "Nothing yet." else lines.joinToString("\n"))
                 textSize = 12f
                 setTextIsSelectable(true)
                 val pad = (20 * resources.displayMetrics.density).toInt()
@@ -196,6 +272,7 @@ class SettingsActivity : AppCompatActivity() {
                 .setMessage("The keypad will then only watch the Wi-Fi, not repair it. To turn it back on you need adb (see the text above).$pinNote")
                 .setPositiveButton("Stop") { _, _ ->
                     guard.log.add("Device owner removed in Settings")
+                    Kiosk.off(this); prefs.kiosk = false; prefs.autoStart = false
                     @Suppress("DEPRECATION")
                     getSystemService(DevicePolicyManager::class.java).clearDeviceOwnerApp(packageName)
                     showOwner()

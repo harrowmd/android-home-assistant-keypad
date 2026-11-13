@@ -131,27 +131,38 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
             if (bssid != null) lastGoodBssid = bssid
         }
         // No Wi-Fi: nothing to test, decide now (never wait for a network check here).
-        if (!connected) { evaluate(false, null, rssi, false, null); return }
+        if (!connected) { record(null, false, -1, null, if (wifi.isWifiEnabled) "not on Wi-Fi" else "Wi-Fi switched off"); evaluate(false, null, rssi, false, null); return }
         // A check can hang (a DNS lookup has no timeout). Don't queue behind it: count it as a failure.
-        if (probing) { evaluate(true, bssid, rssi, false, null); return }
+        if (probing) { record(bssid, false, -1, null, "previous check still hanging"); evaluate(true, bssid, rssi, false, null); return }
         probing = true
         val target = haHostPort()
         val gw = gateway()
         io.execute {
-            val ok = connected && target != null && probe(target.first, target.second)
+            val ms = if (target != null) probe(target.first, target.second) else -1L
+            val ok = ms >= 0
             // If HA does not answer, ask the router too: if it answers, the Wi-Fi is fine and
             // HA itself is down (restart, update), so moving the phone would not help.
             val gwOk = if (!ok && gw != null) ping(gw) else null
-            main.post { probing = false; evaluate(connected, bssid, rssi, ok, gwOk) }
+            main.post {
+                probing = false
+                record(bssid, ok, ms, gwOk, if (target == null) "no server set" else lastProbeError)
+                evaluate(connected, bssid, rssi, ok, gwOk)
+            }
         }
     }
 
-    private fun probe(host: String, port: Int): Boolean = try {
-        Socket().use { it.connect(InetSocketAddress(host, port), 4000) }
-        true
-    } catch (e: Exception) {
-        false
+    /** TCP connect to Home Assistant: the time it took in ms, or -1 with the reason in [lastProbeError]. */
+    private fun probe(host: String, port: Int): Long {
+        val t0 = System.nanoTime()
+        return try {
+            Socket().use { it.connect(InetSocketAddress(host, port), 4000) }
+            (System.nanoTime() - t0) / 1_000_000
+        } catch (e: Exception) {
+            lastProbeError = "${e.javaClass.simpleName}: ${e.message} after ${(System.nanoTime() - t0) / 1_000_000} ms"
+            -1
+        }
     }
+    @Volatile private var lastProbeError = ""
 
     private fun gateway(): InetAddress? {
         val g = wifi.dhcpInfo?.gateway ?: 0
@@ -170,6 +181,37 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
     }
 
     private var gatewayCheckLogged = false
+
+    // ---- debug log: every failed check at once, and a summary line every minute ----
+    private var statOk = 0
+    private var statFail = 0
+    private var statMsSum = 0L
+    private var statMsMax = 0L
+    private var statSince = 0L
+
+    private fun record(bssid: String?, ok: Boolean, ms: Long, gwOk: Boolean?, why: String) {
+        val info = wifi.connectionInfo
+        val link = if (bssid != null && info != null)
+            "${info.ssid?.trim('"')} ${name(bssid).let { if (it == bssid) bssid else "$it [$bssid]" }} ${info.rssi} dBm ${info.frequency} MHz ${info.linkSpeed} Mbps" else "no AP"
+        if (ok) {
+            statOk++; statMsSum += ms; if (ms > statMsMax) statMsMax = ms
+        } else {
+            statFail++
+            val router = when (gwOk) { true -> "router answers"; false -> "router does NOT answer"; null -> "router not checked" }
+            DebugLog.add("HA", "check FAILED on $link: $why; $router")
+        }
+        val now = System.currentTimeMillis()
+        if (statSince == 0L) statSince = now
+        if (now - statSince >= 60_000L) {
+            val n = statOk + statFail
+            val avg = if (statOk > 0) statMsSum / statOk else 0
+            DebugLog.add("STAT", "$link · HA $statOk/$n ok" +
+                (if (statOk > 0) ", avg $avg ms, max $statMsMax ms" else "") +
+                (if (statFail > 0) " · LOST $statFail" else "") +
+                (if (!prefs.wifiGuard) " · guard off" else if (!isDeviceOwner(ctx)) " · watch only" else ""))
+            statOk = 0; statFail = 0; statMsSum = 0; statMsMax = 0; statSince = now
+        }
+    }
 
     private fun evaluate(connected: Boolean, bssid: String?, rssi: Int, haOk: Boolean, gwOk: Boolean?) {
         if (!running) return
@@ -402,7 +444,7 @@ class WifiLog(context: Context) {
 
     @Synchronized
     fun add(msg: String) {
-        Log.i("HAKeypad.Wifi", msg)
+        DebugLog.add("WIFI", msg)
         try {
             file.appendText("${fmt.format(Date())}  $msg\n")
             if (file.length() > 64_000) file.writeText(file.readLines().takeLast(300).joinToString("\n", postfix = "\n"))

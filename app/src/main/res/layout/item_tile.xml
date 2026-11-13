@@ -25,6 +25,8 @@
             android:ellipsize="end"
             android:gravity="center"
             android:maxLines="3"
+            android:breakStrategy="simple"
+            android:hyphenationFrequency="none"
             android:textSize="22sp"
             android:textStyle="bold"
             app:autoSizeTextType="uniform"
