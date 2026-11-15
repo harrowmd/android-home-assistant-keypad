@@ -89,6 +89,9 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
     private var lastProblem = ""
     private var lastHaDown = false
     private val penalty = HashMap<String, Long>()    // bssid → avoid until
+    private var tryingBssid: String? = null           // the AP we last told the phone to join
+    private var dropPenaltyGiven = false              // the AP the phone fell off: avoided once per drop
+    private var failedJoins = 0                       // repairs in a row that did not get the phone on Wi-Fi
 
     private val tick = object : Runnable {
         override fun run() {
@@ -129,6 +132,12 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
             log.add(if (connected) "On ${name(bssid)} at $rssi dBm, ${info.frequency} MHz" else "Not connected to Wi-Fi")
             lastBssid = bssid
             if (bssid != null) lastGoodBssid = bssid
+        }
+        if (bssid != null) {
+            // On an AP again: whatever we tried worked (or Android found its own way).
+            tryingBssid = null
+            dropPenaltyGiven = false
+            failedJoins = 0
         }
         // No Wi-Fi: nothing to test, decide now (never wait for a network check here).
         if (!connected) { record(null, false, -1, null, if (wifi.isWifiEnabled) "not on Wi-Fi" else "Wi-Fi switched off"); evaluate(false, null, rssi, false, null); return }
@@ -331,12 +340,37 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
         repairs++
         // Avoid an AP for a while only if it actually failed, not when moving to a preferred one.
         if (linkDead && bssid != null) penalty[bssid] = now + PENALTY_MS
+        // The AP we told the phone to join last time didn't take it (it refused the phone, e.g. a
+        // mesh steering it to the other band, or never answered): try another one for a while.
+        tryingBssid?.let { t ->
+            if (bssid != t) {
+                penalty[t] = now + PENALTY_MS
+                log.add("${name(t)} did not take the phone: avoiding it for ${PENALTY_MS / 60_000} minutes")
+            }
+        }
+        tryingBssid = null
         // The AP the phone just fell off is probably rebooting or broken, but Android's scan list
-        // can still show it for a while. Skip it for 2 minutes if anything else is in reach.
-        if (dropped) lastGoodBssid?.let { if ((penalty[it] ?: 0) < now) penalty[it] = now + DROP_PENALTY_MS }
+        // can still show it for a while. Skip it for 2 minutes, once per drop (not again and
+        // again while the phone is off the Wi-Fi, or the best AP would never be tried).
+        if (dropped && !dropPenaltyGiven) {
+            lastGoodBssid?.let { if ((penalty[it] ?: 0) < now) penalty[it] = now + DROP_PENALTY_MS }
+            dropPenaltyGiven = true
+        }
         if (!wifi.isWifiEnabled) {
             // Android 10 does not let any normal app (not even a device owner) switch Wi-Fi on.
             log.add("Wi-Fi is switched off; it has to be switched on by hand")
+            return
+        }
+        if (dropped) failedJoins++
+        if (dropped && failedJoins % 4 == 0) {
+            // Safety net: several tries have not got the phone back on the Wi-Fi. Forget every
+            // AP we were avoiding, unpin the network and let Android choose by itself this time.
+            log.add("Repair $repairs: ${failedJoins} tries without Wi-Fi; letting Android choose the AP")
+            penalty.clear()
+            val configs = ourConfigs()
+            unpin(configs)
+            configs.firstOrNull()?.let { wifi.enableNetwork(it.networkId, true) }
+            wifi.reconnect()
             return
         }
         if (repairs % 3 == 0) {
@@ -396,12 +430,21 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
             wifi.reconnect()
             return
         }
+        val current = wifi.connectionInfo?.bssid?.lowercase()
+        if (pick.BSSID.equals(current, ignoreCase = true)) {
+            // Already on the best AP in reach: don't drop the link just to rejoin it.
+            log.add("Staying on ${name(pick.BSSID)} (${pick.level} dBm): nothing better in reach")
+            return
+        }
         pin(configs, pick.BSSID)
         // Use the saved profile that matches the AP's security (WPA3 vs WPA2).
         val sae = pick.capabilities.contains("SAE") && !pick.capabilities.contains("PSK")
         val cfg = configs.firstOrNull { it.allowedKeyManagement.get(WifiConfiguration.KeyMgmt.WPA_PSK) != sae }
             ?: configs.first()
         log.add("Connecting to ${name(pick.BSSID)} (${pick.level} dBm, ${pick.frequency} MHz)")
+        tryingBssid = pick.BSSID
+        // We are moving the phone ourselves: the AP it leaves is not broken, so no drop penalty.
+        dropPenaltyGiven = true
         wifi.disconnect()
         wifi.enableNetwork(cfg.networkId, true)
         wifi.reconnect()
@@ -415,6 +458,15 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
         }
         if (ok) prefs.wifiPinnedTo = bssid
         else log.add("Android refused to pin the network to $bssid")
+    }
+
+    /** Let Android pick any AP of the network again ("any" clears the BSSID lock). */
+    private fun unpin(configs: List<WifiConfiguration>) {
+        for (c in configs) {
+            c.BSSID = "any"
+            wifi.updateNetwork(c)
+        }
+        prefs.wifiPinnedTo = ""
     }
 
     private fun grantLocation() {

@@ -95,6 +95,9 @@ HA Keypad looks after its Wi-Fi:
   Nothing needs setting up: it works with whatever access points are in reach, anywhere.
   (Optionally, Settings → Wi-Fi → Nearby APs can list preferred access points; leave it empty
   for automatic.)
+- An access point that doesn't take the phone (for example a mesh that steers the phone to the
+  other band) is avoided for 10 minutes and the next one is tried. If several tries in a row
+  still leave the phone off the Wi-Fi, the guard lets Android choose the access point itself.
 - When the phone is back on Wi-Fi, the keypad reconnects to Home Assistant at once.
 - After 1 minute without Home Assistant the keypad turns red, so you know to look.
 - Everything it does is written to Settings → Wi-Fi → Wi-Fi log (and to logcat, tag `HAKeypad.Wifi`).
