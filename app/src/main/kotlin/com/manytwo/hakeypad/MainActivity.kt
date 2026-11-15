@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         override fun onLost(network: Network) { DebugLog.add("NET", "Wi-Fi network lost") }
     }
     private lateinit var wifiGuard: WifiGuard
+    private var wallPhone = false
     private val states = HashMap<String, EntityState>()
     private val pending = HashMap<String, Long>()   // entity id → time pressed
 
@@ -89,7 +90,10 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         if (offlineSince == 0L || !prefs.isConfigured) return
         val since = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(offlineSince))
         offlineDetail.text = buildString {
-            append("Since ").append(since).append(". Check the Wi-Fi.\nIt reconnects by itself.")
+            if (wifiGuard.away && wifiGuard.noNetwork) append("Since ").append(since).append(". The phone has no network.")
+            else if (wifiGuard.away) append("Since ").append(since)
+                .append(". Not reachable from this network: away from home it needs a VPN.")
+            else append("Since ").append(since).append(". Check the Wi-Fi.\nIt reconnects by itself.")
             if (lastDetail.isNotBlank()) append("\n\n").append(lastDetail)
             append("\n\n").append(wifiGuard.status)
         }
@@ -133,18 +137,20 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         }
         emptyView.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
 
-        // Watches the Wi-Fi all the time the keypad exists, not only while it is on screen.
+        // On a wall keypad (device owner) the guard watches the Wi-Fi all the time the keypad
+        // exists. On a phone carried around it only runs while the keypad is on screen.
+        wallPhone = WifiGuard.isDeviceOwner(this)
         DebugLog.add("APP", "started: ${DebugLog.deviceLine(this)}")
         DebugLog.add("APP", "server ${android.net.Uri.parse(prefs.serverUrl).host ?: "not set"}, " +
             "${prefs.buttons.size} tiles, device owner ${if (WifiGuard.isDeviceOwner(this)) "yes" else "no"}, " +
             "Wi-Fi guard ${if (prefs.wifiGuard) "on" else "off"}, log ${DebugLog.where}")
         wifiGuard = WifiGuard(this, prefs).also {
             it.onStatus = { if (offlineView.visibility == View.VISIBLE) showOffline(wake = false) }
-            it.start()
+            if (wallPhone) it.start()
         }
 
-        // This is a fixed wall keypad: Back does nothing.
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+        // A fixed wall keypad: Back does nothing. On a phone carried around, Back leaves the app.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(wallPhone) {
             override fun handleOnBackPressed() {}
         })
     }
@@ -165,6 +171,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         batteryTick = 0
         main.post(clockRunnable)
         startClient()
+        if (!wallPhone) wifiGuard.start()
         Kiosk.apply(this, prefs)
     }
 
@@ -180,6 +187,7 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         lastNetwork = null
         client?.stop()
         client = null
+        if (!wallPhone) wifiGuard.stop()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

@@ -19,7 +19,7 @@ replace the phone's home screen so it always comes back.
 - Sensor tiles (temperature, humidity, any `sensor.*`) that are shown but not pressable.
 - Full screen, screen kept on, day/night brightness, wakes on room light, a wave or activity.
 - Can be set as the phone's **Home app**, so it returns after a reboot or a Home press.
-  Back does nothing.
+  On a wall keypad (device owner) Back does nothing; on a phone you carry, Back leaves the app.
 - Settings are hidden: hold the title for 2 seconds, with an optional PIN.
 - Choose buttons from a list loaded from Home Assistant, reorder them and give them short labels.
 - Everything is set on the phone. No server address, token or device names are built into the app.
@@ -60,6 +60,18 @@ so on a phone you carry around it costs nothing once you leave it).
 Settings → Colours: **Like the phone** (follows Android's Dark/Light setting), **Dark** or
 **Light**, and optional own colours for the background, the text and the buttons (off and on),
 from a palette or as #RRGGBB. Text on an ON button is black or white, whichever reads best.
+
+## On a phone you carry
+
+HA Keypad also works as a small remote on an everyday phone (no device owner needed):
+
+- It only works while it is on screen: leave it and the connection to Home Assistant and the
+  Wi-Fi checks stop, so it uses no battery in the background.
+- On mobile data or another Wi-Fi network it only checks that Home Assistant answers, and logs
+  just the changes. If it can't, the red panel says so ("not reachable from this network", or
+  "the phone has no network") instead of asking you to check the Wi-Fi.
+- Away from home the server address must work from the internet: use a VPN to your home
+  network, or make Home Assistant reachable from outside.
 
 ## Wall keypad
 
@@ -105,7 +117,7 @@ HA Keypad looks after its Wi-Fi:
 ### Device owner
 
 Since Android 10, only a *device owner* app may choose the access point or reconnect. Without it,
-the guard only watches and logs. To make HA Keypad device owner (the phone must have no
+the guard only watches and logs, and only while the keypad is on screen. To make HA Keypad device owner (the phone must have no
 accounts, e.g. no Google account):
 
 ```

@@ -69,6 +69,11 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
     var status: String = "Wi-Fi: checking…"
         private set
     var onStatus: ((String) -> Unit)? = null
+    /** On a phone that is not a wall keypad: true while it is on mobile data or another Wi-Fi network. */
+    var away = false
+        private set
+    var noNetwork = false
+        private set
 
     private val ctx = context.applicationContext
     private val wifi = ctx.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -78,6 +83,10 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
     val log = WifiLog(ctx)
 
     private var running = false
+    private var owner = false                         // device owner: may change the Wi-Fi
+    private var startLogged = false
+    private var awayOk: Boolean? = null               // last result away from home, logged on change only
+    private var awayWhere = ""
     private val probes = ArrayDeque<Boolean>()       // last few "HA reachable?" results
     private var badSince = 0L
     private var goodSince = 0L
@@ -104,8 +113,12 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
     fun start() {
         if (running) return
         running = true
-        if (isDeviceOwner(ctx)) grantLocation()
-        log.add("Guard started. Device owner: ${if (isDeviceOwner(ctx)) "yes" else "no (watch only)"}")
+        owner = isDeviceOwner(ctx)
+        if (owner) grantLocation()
+        if (!startLogged) {
+            log.add("Guard started. Device owner: ${if (owner) "yes" else "no (watch only, while the keypad is on screen)"}")
+            startLogged = true
+        }
         main.post(tick)
     }
 
@@ -133,6 +146,12 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
             lastBssid = bssid
             if (bssid != null) lastGoodBssid = bssid
         }
+        // A phone carried around (not device owner): mobile data or another Wi-Fi network is
+        // normal, not a fault. Only check that Home Assistant answers, and log changes only.
+        val ssid = info?.ssid?.trim('"')
+        val home = connected && (prefs.wifiSsid.isBlank() || ssid == prefs.wifiSsid)
+        if (!owner && !home) { checkAway(connected, ssid); return }
+        if (away) { away = false; awayOk = null; awayWhere = ""; DebugLog.add("HA", "back on the home Wi-Fi") }
         if (bssid != null) {
             // On an AP again: whatever we tried worked (or Android found its own way).
             tryingBssid = null
@@ -156,6 +175,40 @@ class WifiGuard(context: Context, private val prefs: Prefs) {
                 probing = false
                 record(bssid, ok, ms, gwOk, if (target == null) "no server set" else lastProbeError)
                 evaluate(connected, bssid, rssi, ok, gwOk)
+            }
+        }
+    }
+
+    private fun checkAway(connected: Boolean, ssid: String?) {
+        away = true
+        if (probing) return
+        val target = haHostPort()
+        if (target == null) { status = "No server set"; onStatus?.invoke(status); return }
+        probing = true
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        val where = when {
+            connected -> "Wi-Fi \"$ssid\""
+            caps == null -> "no network"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+            else -> "another network"
+        }
+        noNetwork = where == "no network"
+        io.execute {
+            val ms = probe(target.first, target.second)
+            main.post {
+                probing = false
+                if (!running) return@post
+                val ok = ms >= 0
+                if (ok != awayOk || where != awayWhere) {
+                    DebugLog.add("HA", "away from home ($where): Home Assistant " +
+                        if (ok) "reachable, $ms ms" else "not reachable: $lastProbeError")
+                    awayOk = ok; awayWhere = where
+                }
+                status = if (noNetwork) "No network (no Wi-Fi, no mobile data)"
+                    else "On $where · Home Assistant ${if (ok) "OK" else "not reachable"}"
+                onStatus?.invoke(status)
             }
         }
     }
