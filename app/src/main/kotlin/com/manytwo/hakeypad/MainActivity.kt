@@ -65,6 +65,12 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
     private val states = HashMap<String, EntityState>()
     private val pending = HashMap<String, Long>()   // entity id → time pressed
 
+    // ---- room reading and − / + target per tile (see Extras) ----
+    private val readingIds = HashMap<String, List<String>>()   // tile → reading entities
+    private val targetIds = HashMap<String, String>()    // tile → target entity
+    private val pendingTarget = HashMap<String, Double>()   // tile → value chosen with − / +, not yet confirmed
+    private val targetSends = HashMap<String, Runnable>()
+
     private val main = Handler(Looper.getMainLooper())
     private lateinit var screen: ScreenControl
     private var pal: Palette? = null
@@ -320,7 +326,8 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
         this.states.clear()
         this.states.putAll(states)
         prefs.cacheNames(prefs.buttons.mapNotNull { id -> states[id]?.let { id to it.name } }.toMap())
-        adapter.notifyDataSetChanged()
+        resolveExtras()
+        layoutTiles()
     }
 
     override fun onPressFailed(entityId: String) {
@@ -338,6 +345,58 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             if (pressedAt == null && prefs.wakeOnChange && old != null) screen.wake("${state.name} switched elsewhere")
         }
         adapter.refresh(state.entityId)
+        // Tiles that show this entity as their reading or target.
+        for (tile in prefs.buttons) {
+            if (tile == state.entityId) continue
+            if (readingIds[tile]?.contains(state.entityId) == true || targetIds[tile] == state.entityId) {
+                if (targetIds[tile] == state.entityId && pendingTarget.containsKey(tile) && !targetSends.containsKey(tile)) {
+                    pendingTarget.remove(tile)   // HA has the new value
+                    DebugLog.add("TARGET", "${state.entityId} now ${state.state}")
+                }
+                adapter.refresh(tile)
+            }
+        }
+        if (targetIds[state.entityId] == state.entityId && pendingTarget.containsKey(state.entityId) && !targetSends.containsKey(state.entityId))
+            pendingTarget.remove(state.entityId).also { adapter.refresh(state.entityId) }   // climate setpoint
+    }
+
+    /** Find each tile's reading and target entity (Settings, or automatically). */
+    private fun resolveExtras() {
+        readingIds.clear(); targetIds.clear()
+        for (tile in prefs.buttons) {
+            Extras.readingIds(tile, states, prefs).takeIf { it.isNotEmpty() }?.let { readingIds[tile] = it }
+            Extras.targetId(tile, states, prefs)?.let { targetIds[tile] = it }
+            prefs.setAutoExtras(tile, "${Extras.autoReading(tile, states) ?: "none"} | ${Extras.autoTarget(tile, states) ?: "none"}")
+        }
+    }
+
+    /** − / + pressed: change the shown target at once, send it to HA when the taps stop. */
+    private fun stepTarget(tile: String, dir: Int, v: View) {
+        val t = Extras.target(tile, states, prefs, null) ?: return
+        val base = pendingTarget[tile] ?: t.value ?: return
+        val nv = t.next(base, dir)
+        if (nv == base) return   // at the limit
+        v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        pendingTarget[tile] = nv
+        adapter.refresh(tile)
+        targetSends.remove(tile)?.let { main.removeCallbacks(it) }
+        val send = Runnable {
+            targetSends.remove(tile)
+            val value = pendingTarget[tile] ?: return@Runnable
+            val ok = if (t.isClimate)
+                client?.callService("climate", "set_temperature", t.entityId, org.json.JSONObject().put("temperature", value)) == true
+            else
+                client?.callService("input_number", "set_value", t.entityId, org.json.JSONObject().put("value", value)) == true
+            DebugLog.add("TARGET", "${t.entityId} → $value" + if (ok) "" else " NOT SENT (offline)")
+            if (!ok) {
+                pendingTarget.remove(tile); adapter.refresh(tile)
+                Toast.makeText(this, "Not changed: no connection to Home Assistant", Toast.LENGTH_LONG).show()
+            } else main.postDelayed({   // no confirmation: show HA's value again
+                if (pendingTarget.remove(tile) != null) adapter.refresh(tile)
+            }, 10_000)
+        }
+        targetSends[tile] = send
+        main.postDelayed(send, 1200)
     }
 
     private fun showStatus(text: String, colorRes: Int) {
@@ -378,6 +437,24 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             while (size > 12) {
                 paint.textSize = size * sp
                 if (paint.measureText(text) <= w) break
+                size--
+            }
+            if (tv.textSize != size * sp) tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size.toFloat())
+        }
+    }
+
+    /** The reading line ("69% (60%)"): 22 sp, smaller (down to 10 sp) until it fits its width. */
+    private fun fitLine(tv: TextView) {
+        tv.post {
+            val w = tv.width - tv.paddingLeft - tv.paddingRight
+            if (w <= 0) return@post
+            val text = tv.text
+            val paint = android.text.TextPaint(tv.paint)
+            val sp = resources.displayMetrics.scaledDensity
+            var size = 22
+            while (size > 10) {
+                paint.textSize = size * sp
+                if (android.text.Layout.getDesiredWidth(text, paint) <= w) break
                 size--
             }
             if (tv.textSize != size * sp) tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size.toFloat())
@@ -444,6 +521,10 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
             val name: TextView = v.findViewById(R.id.name)
             val value: TextView = v.findViewById(R.id.value)
             val tile: View = v.findViewById(R.id.tile)
+            val extraRow: View = v.findViewById(R.id.extra_row)
+            val reading: TextView = v.findViewById(R.id.reading)
+            val minus: TextView = v.findViewById(R.id.minus)
+            val plus: TextView = v.findViewById(R.id.plus)
         }
 
         override fun getItemCount() = items.size
@@ -504,15 +585,46 @@ class MainActivity : AppCompatActivity(), HaClient.Listener {
                     tileColour = if (s.isOn) p.tileOn else p.tileOff
                 }
                 else -> {
-                    h.value.text = if (s.isOn) "ON" else if (s.state == "off") "OFF" else s.state
+                    // ON/OFF is shown by the colour; only other states (e.g. "open") get words.
+                    h.value.text = if (s.isOn || s.state == "off") "" else s.state
                     tileColour = if (s.isOn) p.tileOn else p.tileOff
                 }
             }
-            fitValue(h.value)
             bg.setColor(tileColour)
             val textColor = if (tileColour == p.tileOn) p.textOn else p.text
             h.name.setTextColor(textColor)
             h.value.setTextColor(textColor)
+
+            // Reading and target on one line:  69%  (60%)  −  +
+            val live = connected && s != null && !s.isUnavailable && !isSensor
+            val rs = if (live) Extras.readings(id, states, prefs) else emptyList()
+            val t = if (live) Extras.target(id, states, prefs, rs.firstOrNull()?.unit) else null
+            h.extraRow.visibility = if (rs.isNotEmpty() || t != null) View.VISIBLE else View.GONE
+            val line = android.text.SpannableStringBuilder()
+            // whole numbers: "16° 66%"
+            line.append(rs.joinToString(" ") { r -> (r.value?.let { Math.round(it).toString() } ?: "–") + r.unit })
+            if (t != null) {
+                val shown = pendingTarget[id] ?: t.value
+                if (line.isNotEmpty()) line.append(" ")
+                val from = line.length
+                line.append("(${Extras.fmt(shown, whole = true)}${t.unit})")
+                // The target a little smaller; faded while it waits for Home Assistant.
+                line.setSpan(android.text.style.RelativeSizeSpan(0.8f), from, line.length, 0)
+                if (pendingTarget.containsKey(id))
+                    line.setSpan(android.text.style.ForegroundColorSpan((textColor and 0x00FFFFFF) or 0x99000000.toInt()), from, line.length, 0)
+                h.minus.visibility = View.VISIBLE; h.plus.visibility = View.VISIBLE
+                h.minus.setOnClickListener { stepTarget(id, -1, it) }
+                h.plus.setOnClickListener { stepTarget(id, +1, it) }
+            } else {
+                h.minus.visibility = View.GONE; h.plus.visibility = View.GONE
+            }
+            h.reading.setTextColor(textColor)
+            h.reading.text = line
+            fitLine(h.reading)
+            // Only unusual states (…, offline, "open") get words; ON/OFF is the colour.
+            h.value.visibility = if (h.value.text.isEmpty()) View.GONE else View.VISIBLE
+            if (h.value.visibility == View.VISIBLE) fitValue(h.value)
+            for (tv in listOf(h.minus, h.plus)) tv.setTextColor(textColor)
             h.itemView.alpha = if (pending.containsKey(id)) 0.7f else 1f
 
             if (isSensor) {

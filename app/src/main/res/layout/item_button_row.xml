@@ -16,6 +16,7 @@
 
     <TextView android:id="@+id/row_up" style="@style/RowIcon" android:text="▲" />
     <TextView android:id="@+id/row_down" style="@style/RowIcon" android:text="▼" />
+    <TextView android:id="@+id/row_extras" style="@style/RowIcon" android:text="°" />
     <TextView android:id="@+id/row_rename" style="@style/RowIcon" android:text="✎" />
     <TextView android:id="@+id/row_remove" style="@style/RowIcon" android:text="✕" />
 </LinearLayout>

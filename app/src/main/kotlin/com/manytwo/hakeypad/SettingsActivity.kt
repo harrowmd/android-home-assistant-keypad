@@ -320,9 +320,46 @@ class SettingsActivity : AppCompatActivity() {
                 if (i < buttons.size - 1) { buttons.add(i + 1, buttons.removeAt(i)); showButtons() }
             }
             row.findViewById<View>(R.id.row_rename).setOnClickListener { rename(id) }
+            row.findViewById<View>(R.id.row_extras).setOnClickListener { editExtras(id) }
             row.findViewById<View>(R.id.row_remove).setOnClickListener { buttons.removeAt(i); showButtons() }
             buttonList.addView(row)
         }
+    }
+
+    /** The room reading and the − / + target shown on a tile. */
+    private fun editExtras(id: String) {
+        val auto = prefs.autoExtras(id)?.split(" | ")
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        fun field(hint: String, v: String?) = EditText(this).apply {
+            setText(v ?: ""); this.hint = hint; textSize = 14f; isSingleLine = true
+        }
+        val reading = field("empty = automatic", prefs.readingFor(id))
+        val target = field("empty = automatic", prefs.targetFor(id))
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(TextView(this@SettingsActivity).apply {
+                textSize = 13f
+                text = "Entity ids from Home Assistant (several readings: separate with commas). Leave empty to let the keypad find them, " +
+                    "or type - for none.\n\nReading: a sensor (temperature/humidity), or the climate " +
+                    "tile itself for its own temperature.\nTarget (− / +): an input_number (e.g. the " +
+                    "\"off above\" of a rule), or the climate tile itself for its thermostat setpoint." +
+                    if (auto != null) "\n\nFound automatically: reading ${auto.getOrNull(0)}, target ${auto.getOrNull(1)}" else ""
+            })
+            addView(TextView(this@SettingsActivity).apply { text = "\nReading"; textSize = 14f })
+            addView(reading)
+            addView(TextView(this@SettingsActivity).apply { text = "Target"; textSize = 14f })
+            addView(target)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(prefs.label(id) ?: prefs.cachedName(id) ?: id)
+            .setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                prefs.setReadingFor(id, reading.text.toString())
+                prefs.setTargetFor(id, target.text.toString())
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun rename(id: String) {

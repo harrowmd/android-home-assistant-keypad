@@ -31,6 +31,39 @@
             android:textStyle="bold"
             android:includeFontPadding="false" />
 
+        <!-- Tiles with a reading and/or target, on one line:  69%  (60%)  −  +  -->
+        <LinearLayout
+            android:id="@+id/extra_row"
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <!-- "69% (60%)": sized in code to fit beside − and +. -->
+            <TextView
+                android:id="@+id/reading"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/minus"
+                style="@style/TileStep"
+                android:text="−" />
+
+            <TextView
+                android:id="@+id/plus"
+                style="@style/TileStep"
+                android:layout_marginStart="4dp"
+                android:text="+" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/value"
             android:layout_width="match_parent"

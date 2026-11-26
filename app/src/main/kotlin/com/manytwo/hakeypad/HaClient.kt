@@ -18,7 +18,11 @@ data class EntityState(
     val name: String,
     val unit: String?,
     val deviceClass: String?,
+    val attrs: JSONObject = JSONObject(),
 ) {
+    /** A numeric attribute (e.g. current_temperature), or null. */
+    fun num(key: String): Double? = if (attrs.has(key) && !attrs.isNull(key)) attrs.optDouble(key).takeIf { !it.isNaN() } else null
+
     val domain: String get() = entityId.substringBefore('.')
     val isOn: Boolean get() = state == "on" || state == "open" || state == "playing" ||
         // climate (heaters, air con): any mode other than off counts as on
@@ -35,6 +39,7 @@ data class EntityState(
                 name = a.optString("friendly_name", id),
                 unit = a.optString("unit_of_measurement").ifBlank { null },
                 deviceClass = a.optString("device_class").ifBlank { null },
+                attrs = a,
             )
         }
     }

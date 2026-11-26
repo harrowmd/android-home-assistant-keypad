@@ -17,6 +17,8 @@ replace the phone's home screen so it always comes back.
 - Live state: Home Assistant's WebSocket API, so a button changes the moment the device does,
   even if it was switched from the wall, the eWeLink/Smart Life app or an automation.
 - Sensor tiles (temperature, humidity, any `sensor.*`) that are shown but not pressable.
+- Heaters, dehumidifiers and fans can show the room reading and their target on one line,
+  with − and + to change the target: **`69% (60%) − +`**.
 - Full screen, screen kept on, day/night brightness, wakes on room light, a wave or activity.
 - Can be set as the phone's **Home app**, so it returns after a reboot or a Home press.
   On a wall keypad (device owner) Back does nothing; on a phone you carry, Back leaves the app.
@@ -38,6 +40,24 @@ Android 10 or newer.
 5. Tap **Test connection**, then **Choose buttons**, tick the devices you want and tap **Done**.
 6. Set the title (for example "Master bedroom"), then **Save**.
 7. Optional: **Make this the Home app** and choose HA Keypad, so it is always on screen.
+
+## Readings and targets
+
+A tile can show the room temperature or humidity and a target that − / + change, for example
+`16° (13°) − +` on a heater: 16° now, switches off above 13°. The colour of the tile shows
+whether the device is on, so there is no ON/OFF text.
+
+- **Found automatically.** A heater (`climate.*`) shows its own temperature and changes its own
+  thermostat setpoint. Another switch shows `sensor.<same name>_temperature` or `_humidity`
+  if there is one (a Sonoff with a sensor), and changes the `input_number` whose name starts
+  with the switch's name followed by "off" (for example "Pink Trees Heater off above").
+- **Set by hand.** Settings → the **°** next to a tile: the reading (one or more sensors,
+  separated by commas) and the target (an `input_number`, or the climate tile itself).
+  Type `-` for none.
+- Readings are shown as whole numbers. − / + move the target 1° or 1 % per tap, within the
+  limits Home Assistant allows; the new value is sent when the taps stop and is shown faded
+  until Home Assistant confirms it.
+- The keypad user needs no admin rights for this.
 
 ## Screen: day and night
 

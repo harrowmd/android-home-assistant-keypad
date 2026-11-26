@@ -137,6 +137,23 @@ class Prefs(context: Context) {
         else p.edit().putString("label:$entityId", label.trim()).apply()
     }
 
+    /**
+     * Per tile: the entity shown as the room reading, and the one − / + change (input_number,
+     * or the climate tile itself for its setpoint). null = found automatically, "-" = none.
+     */
+    fun readingFor(entityId: String): String? = p.getString("reading:$entityId", null)?.takeIf { it.isNotBlank() }
+    fun targetFor(entityId: String): String? = p.getString("target:$entityId", null)?.takeIf { it.isNotBlank() }
+    fun setReadingFor(entityId: String, v: String?) = putOrRemove("reading:$entityId", v)
+    fun setTargetFor(entityId: String, v: String?) = putOrRemove("target:$entityId", v)
+    /** What the keypad found automatically last time (shown in Settings). */
+    fun autoExtras(entityId: String): String? = p.getString("auto_extras:$entityId", null)
+    fun setAutoExtras(entityId: String, v: String) {
+        if (p.getString("auto_extras:$entityId", null) != v) p.edit().putString("auto_extras:$entityId", v).apply()
+    }
+    private fun putOrRemove(key: String, v: String?) {
+        if (v.isNullOrBlank()) p.edit().remove(key).apply() else p.edit().putString(key, v.trim()).apply()
+    }
+
     /** Wi-Fi guard on/off (see WifiGuard). Repairs only happen when the app is device owner. */
     var wifiGuard: Boolean
         get() = p.getBoolean("wifi_guard", true)
